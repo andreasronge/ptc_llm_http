@@ -11,6 +11,12 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- A runtime-gated HTTP/1.1 core with bounded DNS results, address-policy
+  enforcement, one pinned TCP/TLS connection, exact request serialization,
+  strict incremental response parsing, content-length and chunked framing,
+  bounded informational responses and trailers, and deterministic close on
+  every outcome. Raw TCP/TLS and property-based fragmentation tests exercise
+  arbitrary JSON echo traffic without exposing the provider call API early.
 - Opaque, redacted target, credential, absolute-deadline, process-budget, and
   closed error contracts, including current address-policy and bearer-token
   validation.

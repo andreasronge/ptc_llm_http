@@ -4,8 +4,9 @@ Bounded BEAM-native HTTP transport and wire codecs for LLM requests.
 
 > **Status: pre-alpha.** Validated targets, call-local credentials, absolute
 > deadlines, process budgets, and the fail-stop physical-admission runtime are
-> in place. No HTTP request can be made yet; the HTTP core and codecs land in
-> later slices under the approved implementation plan in `docs/plans/`.
+> in place. The bounded HTTP/1 core now works against internal raw fixtures;
+> provider codecs and the public call API land in later slices under the
+> approved implementation plan in `docs/plans/`.
 
 ## What this is
 

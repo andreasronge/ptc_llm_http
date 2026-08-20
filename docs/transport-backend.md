@@ -208,9 +208,9 @@ A host without usable trust material fails the connection with
 `:no_trust_store` — whether the store could not be read or was read and held
 nothing, and equally for an empty caller-supplied list.
 
-The first `cacerts_get/0` in a node's life reaches the filesystem, so it runs
-in a task the caller abandons at the deadline. An attempt that was given 200 ms
-must not spend a minute inside a trust store that will not answer; later calls
-hit OTP's cache and cost nothing. There is no fallback to unverified TLS, and no environment
-lookup. Callers may pass their own DER-encoded authorities instead; a
-target-specific trust input is deferred until a deployment needs one.
+The first `cacerts_get/0` in a node's life can reach the filesystem. The HTTP
+runtime therefore performs that lookup inside the registered, heap-bounded DNS
+role before the socket role starts. Deadline or caller cancellation kills the
+whole attempt tree, so no trust helper can detach or survive capacity release;
+later calls use OTP's cache. There is no fallback to unverified TLS and no
+environment lookup. Callers may supply DER-encoded authorities instead.

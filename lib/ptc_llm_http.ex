@@ -32,8 +32,8 @@ defmodule PtcLlmHttp do
 
   ## Status
 
-  Pre-alpha. Validated target/resource contracts and the physical-admission
-  runtime are available, but the HTTP core and codecs have not landed and no
-  network call is possible yet.
+  Pre-alpha. The bounded HTTP/1 core is exercised internally against raw local
+  fixtures. Provider-neutral request/response codecs and the public call API
+  have not landed yet.
   """
 end

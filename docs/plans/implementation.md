@@ -4,10 +4,9 @@
 2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
 `bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
 the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
-is OTP 26, and the trust source is OTP's in-memory platform store. Slice 2 adds
-the validated target, credential, deadline, budget, resource/error contracts,
-and the fail-stop admission runtime. There is still no HTTP request; Slice 3 is
-next.
+is OTP 26, and the trust source is OTP's in-memory platform store. Slices 2 and
+3 added the validated call contracts, fail-stop admission runtime, and bounded
+HTTP/1 core. Provider semantics and the public call API remain for Slice 4.
 
 ## Goal
 
@@ -883,6 +882,10 @@ authorities; target-specific custom CAs are deferred until a real deployment
 needs them, and will require an explicit opaque trust input rather than an
 ambient environment lookup.
 
+The system-store lookup runs in the registered bounded DNS role before the
+socket role begins. It creates no package helper process, so deadline and caller
+cancellation tear it down with the attempt tree before capacity is released.
+
 ## Request serialization
 
 The serializer owns three separate grammars:
@@ -1360,18 +1363,29 @@ backends are internal and carry redacted `Inspect` implementations.
 Exit met: no HTTP parsing yet, but one internal attempt can be safely admitted,
 cancelled, classified, and cleaned up before its physical lease is released.
 
-### Slice 3 — bounded HTTP/1 core
+### Slice 3 — bounded HTTP/1 core — complete
 
-- Implement DNS, TCP/TLS connect, request serialization, send, incremental
-  response parser, content-length, and chunked framing.
-- Enforce the compiled connect-address policy on every literal/resolved address
-  and pin one approved address while preserving the original DNS Host/SNI name;
-  reject HTTPS IP literals.
-- Add raw TCP/TLS fixtures and property-based fragmentation tests.
-- Enforce single connection/attempt, no redirects/compression/retries.
+- Added bounded DNS resolution in the dedicated attempt role, rejected empty,
+  malformed, mixed-policy, and cap-plus-one answer sets, and deterministically
+  pinned one approved address while retaining the validated DNS Host/SNI name.
+- Added exact POST serialization for validated origin-form targets, fixed
+  framing/identity/close headers, optional bearer authorization, body/head
+  ceilings, and one send call under the absolute deadline.
+- Added a strict incremental HTTP/1.1 parser for bounded informational heads,
+  content-length and ordinary chunked bodies, chunk extensions, separate
+  bounded trailers, early close, and cap-plus-one rejection. Redirects,
+  compression, ambiguous length, unsupported transfer coding, close-delimited
+  bodies, upgrades, and malformed CRLF framing are rejected.
+- Routed DNS and the one socket through the registered fail-stop attempt tree;
+  deadline and caller death close the socket before physical capacity is
+  released. Raw TCP/TLS fixtures assert exact bytes, one connection, one
+  request, cleanup, and pinned-address TLS identity; property tests vary every
+  response boundary.
 
-Exit: arbitrary bounded JSON echo requests work against local fixtures without
-provider semantics.
+Exit met: arbitrary bounded JSON echo requests work against local fixtures
+without provider semantics. The transport entry point remains internal; Slice
+4 owns the provider-neutral request/response structs, public call API, and the
+versioned HTTP/provider error partitions.
 
 ### Slice 4 — OpenAI-compatible text and errors
 

@@ -66,11 +66,37 @@ defmodule PtcLlmHttp.Runtime.Guardian do
       )
 
   def progress(guardian, generation, attempt_id, phase, dispatch)
-      when phase in [:admission, :send] and dispatch in [:not_sent, :possibly_sent] do
+      when phase in [
+             :admission,
+             :dns,
+             :connect,
+             :tls,
+             :send,
+             :receive_head,
+             :receive_body
+           ] and dispatch in [:not_sent, :possibly_sent, :completed] do
     mutating_call(
       guardian,
       {:progress, generation, attempt_id, phase, dispatch},
       Limits.cleanup_milliseconds()
+    )
+  end
+
+  def progress_until(guardian, generation, attempt_id, phase, dispatch, timeout)
+      when phase in [
+             :admission,
+             :dns,
+             :connect,
+             :tls,
+             :send,
+             :receive_head,
+             :receive_body
+           ] and dispatch in [:not_sent, :possibly_sent, :completed] and is_integer(timeout) and
+             timeout > 0 do
+    progress_call(
+      guardian,
+      {:progress, generation, attempt_id, phase, dispatch},
+      timeout
     )
   end
 
@@ -609,6 +635,13 @@ defmodule PtcLlmHttp.Runtime.Guardian do
 
     :exit, _guardian_gone ->
       {:error, :runtime_unavailable}
+  end
+
+  defp progress_call(server, message, timeout) do
+    GenServer.call(server, message, timeout)
+  catch
+    :exit, {:timeout, _call} -> {:error, :timeout}
+    :exit, _guardian_gone -> {:error, :runtime_unavailable}
   end
 
   defp deadline_call(server, message, timeout) do
