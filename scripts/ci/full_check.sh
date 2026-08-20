@@ -7,6 +7,8 @@
 # `:release` tagged tests that `mix test` excludes by default, so the suite runs
 # once here rather than twice.
 
+set -euo pipefail
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 "$script_dir/quality.sh"
