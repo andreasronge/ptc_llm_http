@@ -95,7 +95,9 @@ defmodule PtcLlmHttp.Runtime do
     do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
 
   @doc false
-  def run_http(runtime, %Target{} = target, budget, deadline, {:http, spec})
+  @spec run_http(t(), Target.t(), ProcessBudget.t(), Deadline.t(), {:http, map()}) ::
+          {:ok, term()} | {:error, Error.t()}
+  def run_http(runtime, target, budget, deadline, {:http, spec})
       when is_pid(runtime) and is_map(spec) do
     operation = {:http, Map.put(spec, :deadline, deadline)}
     run_owned_attempt(runtime, Target.capacity_group(target), budget, deadline, operation)
@@ -237,7 +239,7 @@ defmodule PtcLlmHttp.Runtime do
     do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
 
   defp start_root(config) do
-    case Root.start_link(config) do
+    case Root.start_link(config, self()) do
       {:ok, root} -> {:ok, root}
       {:error, _reason} -> {:error, runtime_error()}
     end

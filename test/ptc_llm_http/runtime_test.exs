@@ -999,7 +999,9 @@ defmodule PtcLlmHttp.RuntimeTest do
 
     assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
     assert_receive {:DOWN, ^role_monitor, :process, ^role, _reason}
-    assert {:error, %Error{kind: :runtime_unavailable}} = Task.await(task, 2_000)
+    assert {:error, error} = Task.await(task, 2_000)
+
+    assert %{kind: :runtime_unavailable} = Map.from_struct(error)
   end
 
   test "every package process receives its exact derived heap ceiling before work" do

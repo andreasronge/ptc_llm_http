@@ -9,11 +9,11 @@ defmodule PtcLlmHttp.Http.Request do
 
   @spec encode(Target.t(), Credential.t(), [binary()], binary()) ::
           {:ok, binary(), binary(), non_neg_integer()} | {:error, atom()}
-  def encode(%Target{} = target, %Credential{} = credential, operation_segments, body)
+  def encode(target, credential, operation_segments, body)
       when is_list(operation_segments) and is_binary(body) do
     authority = Target.authority(target)
 
-    with true <- byte_size(body) <= target.max_encoded_request_bytes,
+    with true <- byte_size(body) <= Target.max_encoded_request_bytes(target),
          {:ok, request_target} <- request_target(authority.path_segments, operation_segments),
          {:ok, fields} <- fields(authority, credential, byte_size(body)),
          true <- length(fields) <= Limits.request_header_fields(),

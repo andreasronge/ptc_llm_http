@@ -6,14 +6,14 @@ defmodule PtcLlmHttp.Runtime.Root do
   alias PtcLlmHttp.Limits
   alias PtcLlmHttp.Runtime.{GenerationSupervisor, Guardian}
 
-  def start_link(config), do: Supervisor.start_link(__MODULE__, config)
+  def start_link(config, owner), do: Supervisor.start_link(__MODULE__, {config, owner})
 
   @impl Supervisor
-  def init(config) do
+  def init({config, owner}) do
     :ok = Limits.set_max_heap(config.control_partition.root)
 
     children = [
-      Supervisor.child_spec({Guardian, config}, id: Guardian, restart: :permanent),
+      Supervisor.child_spec({Guardian, {config, owner}}, id: Guardian, restart: :permanent),
       Supervisor.child_spec(
         {GenerationSupervisor, config},
         id: GenerationSupervisor,

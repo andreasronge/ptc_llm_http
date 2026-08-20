@@ -9,7 +9,7 @@ defmodule PtcLlmHttp.Transport.Dns do
   @type resolver :: (binary() -> {:ok, [address()]} | {:error, atom()})
 
   @spec resolve(Target.t(), resolver()) :: {:ok, address()} | {:error, atom()}
-  def resolve(%Target{} = target, resolver) when is_function(resolver, 1) do
+  def resolve(target, resolver) when is_function(resolver, 1) do
     authority = Target.authority(target)
 
     case ConnectPolicy.parse_address(authority.host) do
@@ -40,7 +40,6 @@ defmodule PtcLlmHttp.Transport.Dns do
       {:ok, addresses} -> {:ok, addresses}
       {:error, :nxdomain} -> {:ok, []}
       {:error, reason} when is_atom(reason) -> {:error, reason}
-      {:error, _reason} -> {:error, :resolver_failure}
     end
   end
 

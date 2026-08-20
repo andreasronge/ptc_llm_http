@@ -31,8 +31,8 @@ defmodule PtcLlmHttp.Transport do
 
   def request(
         runtime,
-        %Target{} = target,
-        %Credential{} = credential,
+        target,
+        credential,
         operation_segments,
         body,
         budget,
@@ -43,31 +43,56 @@ defmodule PtcLlmHttp.Transport do
     with :ok <- validate_options(options),
          true <- Target.credential_compatible?(target, credential),
          {:ok, deadline} <- Deadline.validate(deadline),
-         {:ok, _remaining} <- Deadline.remaining(deadline),
-         {:ok, head, body, encoded_bytes} <-
-           Request.encode(target, credential, operation_segments, body) do
-      operation =
-        {:http,
-         %{
-           target: target,
-           head: head,
-           body: body,
-           encoded_bytes: encoded_bytes,
-           resolver: Keyword.get(options, :resolver, &Dns.system_resolve/1),
-           trust: Keyword.get(options, :trust, :system)
-         }}
-
-      Runtime.run_http(runtime, target, budget, deadline, operation)
+         {:ok, _remaining} <- Deadline.remaining(deadline) do
+      encode_and_run(
+        runtime,
+        target,
+        credential,
+        operation_segments,
+        body,
+        budget,
+        deadline,
+        options
+      )
     else
       false -> {:error, Error.build!(:invalid_credential, :validate, :credential, :not_sent)}
       :error -> {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
-      {:error, %Error{} = error} -> {:error, error}
-      {:error, _reason} -> {:error, Error.build!(:invalid_request, :encode, :request, :not_sent)}
+      {:error, error} -> {:error, error}
     end
   end
 
   def request(_runtime, _target, _credential, _segments, _body, _budget, _deadline, _options),
     do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
+
+  defp encode_and_run(
+         runtime,
+         target,
+         credential,
+         operation_segments,
+         body,
+         budget,
+         deadline,
+         options
+       ) do
+    case Request.encode(target, credential, operation_segments, body) do
+      {:ok, head, body, encoded_bytes} ->
+        operation =
+          {:http,
+           %{
+             target: target,
+             head: head,
+             body: body,
+             encoded_bytes: encoded_bytes,
+             resolver: Keyword.get(options, :resolver, &Dns.system_resolve/1),
+             trust: Keyword.get(options, :trust, :system)
+           }}
+
+        Runtime.run_http(runtime, target, budget, deadline, operation)
+
+      {:error, _reason} ->
+        {:error, Error.build!(:invalid_request, :encode, :request, :not_sent)}
+    end
+  end
 
   @doc false
   def resolve(%{target: target, resolver: resolver, trust: trust}) do
@@ -143,7 +168,7 @@ defmodule PtcLlmHttp.Transport do
          valid_trust?(Keyword.get(options, :trust, :system)) do
       :ok
     else
-      {:error, :invalid_options}
+      :error
     end
   end
 

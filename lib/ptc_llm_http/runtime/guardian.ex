@@ -16,12 +16,22 @@ defmodule PtcLlmHttp.Runtime.Guardian do
     :internal_failure
   ]
 
-  def start_link(config), do: GenServer.start_link(__MODULE__, config)
+  def start_link({config, owner}), do: GenServer.start_link(__MODULE__, {config, owner})
 
   @impl GenServer
-  def init(config) do
+  def init({config, owner}) do
     :ok = Limits.set_max_heap(config.control_partition.guardian)
-    {:ok, %{config: config, generation: nil, attempts: %{}, monitor_index: %{}}}
+    owner_ref = Process.monitor(owner)
+
+    {:ok,
+     %{
+       config: config,
+       owner: owner,
+       owner_ref: owner_ref,
+       generation: nil,
+       attempts: %{},
+       monitor_index: %{}
+     }}
   end
 
   def bind(guardian, generation_supervisor, outer, components) do
@@ -251,6 +261,14 @@ defmodule PtcLlmHttp.Runtime.Guardian do
         %{generation: %{id: generation, phase: :fenced}} = state
       ) do
     brutally_stop_generation(state)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:DOWN, owner_ref, :process, owner, _reason},
+        %{owner: owner, owner_ref: owner_ref} = state
+      ) do
+    state = state |> Map.put(:owner_ref, nil) |> fence_generation()
     {:noreply, state}
   end
 
