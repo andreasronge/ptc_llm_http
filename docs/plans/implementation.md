@@ -4,9 +4,10 @@
 2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
 `bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
 the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
-is OTP 26, and the trust source is OTP's in-memory platform store. The retained
-contract and its measurements are in `docs/transport-backend.md`. There is no
-public API and no HTTP request yet; Slice 2 is next.
+is OTP 26, and the trust source is OTP's in-memory platform store. Slice 2 adds
+the validated target, credential, deadline, budget, resource/error contracts,
+and the fail-stop admission runtime. There is still no HTTP request; Slice 3 is
+next.
 
 ## Goal
 
@@ -179,11 +180,17 @@ lib/
   ptc_llm_http/runtime/root.ex
   ptc_llm_http/runtime/guardian.ex
   ptc_llm_http/runtime/generation.ex
+  ptc_llm_http/runtime/generation_supervisor.ex
   ptc_llm_http/runtime/admission.ex
+  ptc_llm_http/runtime/attempt_supervisor.ex
   ptc_llm_http/runtime/attempt_tree.ex
+  ptc_llm_http/runtime/coordinator.ex
+  ptc_llm_http/runtime/role.ex
   ptc_llm_http/runtime/attempt_relay.ex
   ptc_llm_http/target.ex
+  ptc_llm_http/connect_policy.ex
   ptc_llm_http/credential.ex
+  ptc_llm_http/limits.ex
   ptc_llm_http/process_budget.ex
   ptc_llm_http/resource_contract.ex
   ptc_llm_http/request.ex
@@ -234,6 +241,11 @@ trusted callbacks may raise after cleanup.
     max_concurrency: 8,
     groups: %{"openrouter-account" => 4}
   )
+
+true = PtcLlmHttp.Runtime.ready?(runtime)
+
+{:ok, %{in_use: 0, limit: 8, groups: groups}} =
+  PtcLlmHttp.Runtime.snapshot(runtime)
 ```
 
 The package exposes one data-only `PtcLlmHttp.ResourceContract.current/0`
@@ -410,6 +422,8 @@ selection.
 
 ```elixir
 {:ok, credential} = PtcLlmHttp.Credential.bearer(secret_bytes)
+
+credential_free = PtcLlmHttp.Credential.none()
 ```
 
 V1 supports `:none` and bearer authorization. The value is opaque, has redacted
@@ -465,17 +479,20 @@ cost limit.
     total_heap_words: 4_000_000
   )
 
+{:ok, absolute_deadline} =
+  PtcLlmHttp.Deadline.new(System.monotonic_time(:millisecond) + 30_000)
+
 {:ok, response} =
   PtcLlmHttp.call(runtime, target, request,
     credential: credential,
-    deadline: absolute_monotonic_deadline,
+    deadline: absolute_deadline,
     process_budget: process_budget
   )
 
 {:ok, completion} =
   PtcLlmHttp.stream(runtime, target, request, on_chunk,
     credential: credential,
-    deadline: absolute_monotonic_deadline,
+    deadline: absolute_deadline,
     process_budget: process_budget
   )
 ```
@@ -595,7 +612,8 @@ Provider error codes exposed publicly are atoms from a closed, codec/version-
 specific enum or `nil`; unknown raw codes are discarded and take the default
 status mapping. No arbitrary string or open-ended scope crosses the boundary.
 
-`PtcLlmHttp.Error.contract/0` returns a version plus a bounded sorted list of
+Slice 2 publishes the non-wire entries as `error-base-v1`.
+`PtcLlmHttp.Error.contract/0` returns that version plus a bounded sorted list of
 disjoint contract entries. Each entry has a stable ID and enumerates its exact
 kind, allowed phases, HTTP status list/ranges, provider-code atoms, scopes, and
 dispatch states. It also returns the full kind/phase/scope/code enums. Every
@@ -1313,23 +1331,34 @@ Exit met: the backend contract holds on macOS locally and on Linux, macOS, and
 the minimum OTP in CI. No public API and no HTTP request exists yet; the
 backends are internal and carry redacted `Inspect` implementations.
 
-### Slice 2 — target, credential, deadline, and admission runtime
+### Slice 2 — target, credential, deadline, and admission runtime — complete
 
-- Implement opaque constructors and redacted inspection.
-- Freeze runtime, target, credential, deadline, and the base closed error public
-  types; add constructor/redaction and runtime/resource error-contract tests
-  before use.
-- Implement absolute deadlines.
-- Implement the required aggregate `ProcessBudget`, per-role heap ceilings,
-  fail-stop per-attempt ownership tree, and closed resource-limit error path.
-- Implement the stable guardian plus fail-stop `:one_for_all` generation,
-  atomic runtime/group physical admission, supervised attempt/socket ownership,
-  and generation fencing; prove admission-owner restart cannot reset counters or
-  publish readiness under surviving attempts.
-- Prove release on every lifecycle path using a scripted backend.
+- Added opaque target, credential, deadline, process-budget, and error values
+  with sentinel redaction tests and exact external-input validation.
+- Published the data-only `resource-v1` and `error-base-v1` contracts, with the
+  package-owned `process-v1` and `runtime-control-v1` partitions.
+- Added the internal named limit catalog, current IANA-derived connect policy,
+  literal-loopback restriction, bounded RFC 6750 bearer grammar, and exact URL
+  path decoding rules.
+- Added the `:rest_for_one` runtime root, stable guardian, temporary fail-stop
+  generation, atomic global/group admission owner, dynamic attempt supervisor,
+  and fixed-role `:one_for_all` attempt trees.
+- Made admission provisionally monitor the caller and own tree startup until
+  guardian registration atomically adopts the lease; caller death in that
+  pre-registration window kills the payload-free tree and releases capacity.
+- Added caller-retained two-phase terminal handoff, aggregate 900/100 millisecond
+  concurrent cleanup, per-process heap ceilings, phase/dispatch tracking,
+  closed resource-limit classification, and generation fencing/replacement.
+- Proved readiness/snapshots, atomic refusal, success/classified-error release,
+  delayed deadline arbitration, caller and runtime-owner death, every fixed
+  role's and the attempt supervisor tree's heap death before/after dispatch,
+  terminal-candidate precedence, admission-owner death before/after terminal
+  handoff, guardian/attempt-supervisor/outer-generation death, no payload in
+  shared control state, and replacement without stale capacity through the
+  scripted backend.
 
-Exit: no HTTP parsing yet, but one attempt can be safely admitted, cancelled,
-and cleaned up.
+Exit met: no HTTP parsing yet, but one internal attempt can be safely admitted,
+cancelled, classified, and cleaned up before its physical lease is released.
 
 ### Slice 3 — bounded HTTP/1 core
 
