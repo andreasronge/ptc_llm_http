@@ -19,8 +19,8 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   certificate-chain, and fragmentation cases.
 - `docs/transport-backend.md`: the retained socket/TLS decisions and the
   measurements behind them.
-- `PtcLlmHttp.Transport.Trust`: runs one blocking trust lookup under a deadline
-  the caller can walk away from and cannot be hurt by.
+- Platform-trust lookup runs under the attempt's deadline, in a process the
+  caller can walk away from and cannot be hurt by.
 - Repository infrastructure: Mix project, formatter, Credo, Dialyzer, ExDoc,
   StreamData, and usage-rules tooling.
 - Repository-owned gates `mix check` and `mix full_check`, implemented as

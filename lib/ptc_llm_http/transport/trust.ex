@@ -56,18 +56,18 @@ defmodule PtcLlmHttp.Transport.Trust do
     end
   end
 
-  defp guard(caller, reply, loader) do
+  defp guard(caller, reply, load) do
     guardian = self()
     caller_down = Process.monitor(caller)
-    loader = spawn_link(fn -> send(guardian, {reply, loader.()}) end)
-    loader_down = Process.monitor(loader)
+
+    # Linked in both directions of usefulness: a caller that kills this
+    # guardian takes the loader with it, and a loader that fails takes the
+    # guardian down for the caller to see.
+    loader = spawn_link(fn -> send(guardian, {reply, load.()}) end)
 
     receive do
       {^reply, result} ->
         send(caller, {reply, result})
-
-      {:DOWN, ^loader_down, :process, ^loader, _crashed} ->
-        :ok
 
       {:DOWN, ^caller_down, :process, ^caller, _abandoned} ->
         Process.exit(loader, :kill)
