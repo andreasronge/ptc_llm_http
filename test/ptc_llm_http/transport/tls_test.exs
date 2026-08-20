@@ -49,7 +49,12 @@ defmodule PtcLlmHttp.Transport.TlsTest do
     test "rejects a certificate that does not name the host asked for" do
       server = start_peer(Certificates.build(names: ["elsewhere.example"]))
 
-      assert {:error, {:tls, :bad_certificate}} = open(server, deadline(5_000))
+      # Which alert a rejected certificate produces is not stable across OTP
+      # releases -- 26 sends `handshake_failure` where 29 sends
+      # `bad_certificate` -- so the contract is that it fails, and callers
+      # classify by kind rather than by alert name.
+      assert {:error, {:tls, alert}} = open(server, deadline(5_000))
+      assert alert in [:bad_certificate, :handshake_failure]
     end
 
     test "rejects a chain that no trusted authority signed" do
@@ -101,6 +106,21 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       assert :ok = Tls.close(socket)
     end
 
+    test "refuses to negotiate a protocol other than HTTP/1.1" do
+      server =
+        start_supervised!(
+          {RawServer, [transport: :tls, certificates: Certificates.build(), protocols: ["h2"]]}
+        )
+
+      assert {:error, {:tls, :no_application_protocol}} = open(server, deadline(5_000))
+    end
+
+    test "refuses to connect with no authorities to verify against" do
+      server = start_peer()
+
+      assert {:error, :no_trust_store} = open(server, deadline(5_000), trust: [])
+    end
+
     test "gives up at the deadline when the peer never answers the handshake" do
       # A plain-TCP peer accepts the connection and says nothing further, which
       # is also the proof that this backend has no plaintext fallback: it never
@@ -113,7 +133,7 @@ defmodule PtcLlmHttp.Transport.TlsTest do
                    address: @loopback,
                    port: RawServer.port(server),
                    hostname: "localhost",
-                   trust: []
+                   trust: Certificates.build().roots
                  },
                  deadline(100)
                )
@@ -123,10 +143,12 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       server = start_supervised!({RawServer, [transport: :tcp]})
       port = RawServer.port(server)
 
+      trust = Certificates.build().roots
+
       caller =
         spawn(fn ->
           Tls.connect(
-            %{address: @loopback, port: port, hostname: "localhost", trust: []},
+            %{address: @loopback, port: port, hostname: "localhost", trust: trust},
             deadline(30_000)
           )
         end)
@@ -178,10 +200,12 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       reader = Task.async(fn -> Tls.recv_up_to(socket, 16, deadline(30_000)) end)
       await_blocked(reader.pid)
 
-      socket.socket
-      |> Tuple.to_list()
-      |> Enum.filter(&is_pid/1)
-      |> Enum.each(&Process.exit(&1, :kill))
+      # Where `:ssl` keeps those pids inside its socket term differs by release,
+      # so they are found by walking it. Asserting that some were found keeps a
+      # future shape change loud instead of turning this into a test that kills
+      # nothing and proves nothing.
+      assert [_ | _] = processes = connection_processes(socket.socket)
+      Enum.each(processes, &Process.exit(&1, :kill))
 
       assert {:error, {:transport, :process_exit}} = Task.await(reader, 5_000)
     end
@@ -192,6 +216,24 @@ defmodule PtcLlmHttp.Transport.TlsTest do
 
     assert inspect(socket) == "#PtcLlmHttp.Transport.Tls<redacted>"
     refute inspect(socket) =~ "socket"
+  end
+
+  test "reports closure when the peer dies without a close notification" do
+    {server, socket} = connected()
+    reference = Process.monitor(server)
+    Process.exit(server, :kill)
+    assert_receive {:DOWN, ^reference, :process, ^server, :killed}, 5_000
+
+    assert {:error, :closed} = Tls.recv_up_to(socket, 4_096, deadline(5_000))
+  end
+
+  test "many small records still arrive within one record's cap" do
+    {server, socket} = connected()
+    Enum.each(1..400, fn _ -> :ok = RawServer.write(server, :binary.copy("z", 200)) end)
+
+    {read, socket} = read_bytes(socket, 80_000, [SocketBackend.max_chunk()])
+    assert byte_size(read) == 80_000
+    assert socket.leftover == <<>>
   end
 
   test "one arrival is one TLS record at most, whatever the caller asks for" do
@@ -206,6 +248,16 @@ defmodule PtcLlmHttp.Transport.TlsTest do
   defp extension(value), do: {:Extension, {1, 3, 6, 1, 4, 1, 57_264, 1}, false, value}
 
   defp pad(bytes), do: :binary.copy("A", bytes)
+
+  defp connection_processes(pid) when is_pid(pid), do: [pid]
+
+  defp connection_processes(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> connection_processes()
+
+  defp connection_processes(term) when is_list(term),
+    do: Enum.flat_map(term, &connection_processes/1)
+
+  defp connection_processes(_other), do: []
 
   # Blocks until `pid` is parked in a receive, so a test can act on a call that
   # is genuinely in flight rather than one that might not have started.

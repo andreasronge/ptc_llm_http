@@ -31,8 +31,11 @@ defmodule PtcLlmHttp.Transport.Tls do
   @type trust :: :system | [binary()]
 
   # Intermediate CAs allowed between the peer certificate and a trusted root.
-  # OTP's own default, stated rather than inherited: real chains carry one or
-  # two, cross-signed ones a few more.
+  # Real chains carry one or two, cross-signed ones a few more. The value
+  # equals OTP 26 through 29's own default, measured, so it is pinned here to
+  # stop a future default from silently widening the bound rather than to
+  # narrow it today -- narrowing it would reject peers every other client can
+  # reach, which is a target-level decision, not a transport-level one.
   @depth 10
 
   # Cap on a handshake message that spans several records. A message that fits
@@ -84,8 +87,12 @@ defmodule PtcLlmHttp.Transport.Tls do
   @impl SocketBackend
   def connect(%{address: address, port: port, hostname: hostname, trust: trust}, deadline)
       when is_tuple(address) and is_integer(port) and port in 1..65_535 and is_binary(hostname) do
-    with {:ok, timeout} <- SocketBackend.remaining(deadline),
-         {:ok, cacerts} <- authorities(trust) do
+    # Resolving trust can read and parse the platform store on its first call,
+    # so the remaining time is taken after it rather than before: a deadline
+    # that has been spent loading certificates has still been spent.
+    with {:ok, _budget} <- SocketBackend.remaining(deadline),
+         {:ok, cacerts} <- authorities(trust),
+         {:ok, timeout} <- SocketBackend.remaining(deadline) do
       case handshake(address, port, options(hostname, cacerts), timeout) do
         {:ok, socket} -> {:ok, %__MODULE__{socket: socket}}
         {:error, reason} -> {:error, reason}
@@ -145,13 +152,21 @@ defmodule PtcLlmHttp.Transport.Tls do
     ] ++ @options
   end
 
+  # `cacerts_get/0` raises when it cannot read a store, and returns an empty
+  # list when it read one that holds nothing. Both are the same thing to a
+  # caller: there is nothing to verify against, and verifying against nothing
+  # is not an option this package offers.
   defp authorities(:system) do
-    {:ok, :public_key.cacerts_get()}
+    case :public_key.cacerts_get() do
+      [_ | _] = cacerts -> {:ok, cacerts}
+      [] -> {:error, :no_trust_store}
+    end
   catch
-    :error, _no_store -> {:error, :no_trust_store}
+    :error, _unreadable_store -> {:error, :no_trust_store}
   end
 
-  defp authorities(cacerts) when is_list(cacerts), do: {:ok, cacerts}
+  defp authorities([_ | _] = cacerts), do: {:ok, cacerts}
+  defp authorities([]), do: {:error, :no_trust_store}
 
   defp handshake(address, port, options, timeout) do
     guard(fn ->

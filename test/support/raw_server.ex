@@ -14,7 +14,10 @@ defmodule PtcLlmHttp.Test.RawServer do
 
   alias PtcLlmHttp.Test.Certificates
 
-  @type option :: {:transport, :tcp | :tls} | {:certificates, Certificates.bundle()}
+  @type option ::
+          {:transport, :tcp | :tls}
+          | {:certificates, Certificates.bundle()}
+          | {:protocols, [binary()]}
 
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(options), do: GenServer.start_link(__MODULE__, options)
@@ -77,7 +80,7 @@ defmodule PtcLlmHttp.Test.RawServer do
     transport = Keyword.get(options, :transport, :tcp)
     bundle = Keyword.get(options, :certificates)
 
-    {:ok, listen} = listen(transport, bundle)
+    {:ok, listen} = listen(transport, bundle, Keyword.get(options, :protocols, ["http/1.1"]))
 
     state = %{
       transport: transport,
@@ -222,11 +225,11 @@ defmodule PtcLlmHttp.Test.RawServer do
     end
   end
 
-  defp listen(:tcp, _bundle) do
+  defp listen(:tcp, _bundle, _protocols) do
     :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true, backlog: 8])
   end
 
-  defp listen(:tls, bundle) do
+  defp listen(:tls, bundle, protocols) do
     :ssl.listen(
       0,
       [
@@ -236,7 +239,7 @@ defmodule PtcLlmHttp.Test.RawServer do
         reuseaddr: true,
         backlog: 8,
         versions: [:"tlsv1.2", :"tlsv1.3"],
-        alpn_preferred_protocols: ["http/1.1"],
+        alpn_preferred_protocols: protocols,
         log_level: :none
       ] ++ Certificates.server_options(bundle)
     )
