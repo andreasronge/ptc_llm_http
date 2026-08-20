@@ -238,15 +238,14 @@ defmodule PtcLlmHttp.RuntimeTest do
 
   test "a role heap death is classified without exposing its raw reason" do
     runtime = runtime(max_concurrency: 1, groups: %{"group" => 1})
-    {:ok, budget} = ProcessBudget.new(total_heap_words: 100_000)
 
     result =
       Runtime.run_attempt(
         runtime,
         "group",
-        budget,
+        budget(),
         deadline(),
-        ScriptedBackend.allocate(self(), :heap, 200_000)
+        ScriptedBackend.allocate(self(), :heap, 1_000_000)
       )
 
     assert_receive {:scripted_backend_started, :heap, _role}
