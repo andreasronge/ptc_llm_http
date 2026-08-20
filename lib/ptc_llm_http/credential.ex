@@ -35,9 +35,11 @@ defmodule PtcLlmHttp.Credential do
   def bearer(_secret), do: invalid()
 
   @doc false
+  @spec kind(t()) :: :none | :bearer
   def kind(%__MODULE__{kind: kind}), do: kind
 
   @doc false
+  @spec authorization_value(t()) :: nil | iodata()
   def authorization_value(%__MODULE__{kind: :none}), do: nil
   def authorization_value(%__MODULE__{kind: :bearer, secret: secret}), do: ["Bearer ", secret]
 

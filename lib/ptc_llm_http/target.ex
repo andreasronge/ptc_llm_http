@@ -101,21 +101,30 @@ defmodule PtcLlmHttp.Target do
   def new(_options), do: invalid()
 
   @doc false
+  @spec capacity_group(t()) :: binary()
   def capacity_group(%__MODULE__{capacity_group: group}), do: group
 
   @doc false
+  @spec connect_policy(t()) :: term()
   def connect_policy(%__MODULE__{connect_policy: policy}), do: policy
 
   @doc false
-  def credential_compatible?(%__MODULE__{scheme: :https}, %Credential{}), do: true
+  @spec credential_compatible?(t(), Credential.t()) :: boolean()
+  def credential_compatible?(%__MODULE__{scheme: :https}, _credential), do: true
 
   def credential_compatible?(
         %__MODULE__{scheme: :http, connect_policy: :literal_loopback},
-        %Credential{} = credential
+        credential
       ),
       do: Credential.kind(credential) == :none
 
   @doc false
+  @spec authority(t()) :: %{
+          scheme: :http | :https,
+          host: binary(),
+          port: :inet.port_number(),
+          path_segments: [binary()]
+        }
   def authority(%__MODULE__{} = target) do
     %{
       scheme: target.scheme,
@@ -124,6 +133,10 @@ defmodule PtcLlmHttp.Target do
       path_segments: target.path_segments
     }
   end
+
+  @doc false
+  @spec max_encoded_request_bytes(t()) :: pos_integer()
+  def max_encoded_request_bytes(%__MODULE__{max_encoded_request_bytes: maximum}), do: maximum
 
   defp exact_options(options) do
     if Keyword.keyword?(options) and length(options) == length(@keys) and
