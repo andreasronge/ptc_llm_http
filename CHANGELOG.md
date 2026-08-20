@@ -11,6 +11,15 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- Opaque, redacted target, credential, absolute-deadline, process-budget, and
+  closed error contracts, including current address-policy and bearer-token
+  validation.
+- A fail-stop physical-admission runtime with atomic global/group ceilings,
+  fixed-role bounded attempt trees, caller-retained terminal handoff, bounded
+  concurrent cleanup, provisional caller-death-safe startup, generation
+  fencing, and readiness/counter snapshots.
+- Versioned `resource-v1`, `process-v1`, `runtime-control-v1`, and
+  `error-base-v1` data contracts for consumer integration checks.
 - Bounded socket backends for plain TCP and verified TLS, behind one internal
   `recv_up_to/3` contract: prompt partial delivery, an exact per-call maximum,
   unread bytes preserved in order, and timeout, closure, and transport failure

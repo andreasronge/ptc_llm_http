@@ -32,7 +32,8 @@ defmodule PtcLlmHttp do
 
   ## Status
 
-  Pre-alpha. This module is the reserved public namespace: the transport,
-  runtime, and codecs land slice by slice, and no network call is possible yet.
+  Pre-alpha. Validated target/resource contracts and the physical-admission
+  runtime are available, but the HTTP core and codecs have not landed and no
+  network call is possible yet.
   """
 end
