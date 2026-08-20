@@ -34,15 +34,38 @@ defmodule PtcLlmHttp.Transport.TrustTest do
              {:error, :no_trust_store}
   end
 
-  test "gives up at the deadline and takes the loader with it" do
-    # The deadline is long enough that the loader has certainly been scheduled
-    # and has announced itself; it is short enough to keep the test quick. Its
-    # length is not what is being asserted.
-    assert {:error, :timeout} = Trust.load(blocking_loader(self()), deadline(300))
+  test "gives up at the deadline and takes any loader it started with it" do
+    # The loader records itself where the test can read it afterwards rather
+    # than messaging: on a starved scheduler it may be killed before it runs at
+    # all, and "nothing it started survives" is the contract either way. A
+    # message-based barrier cannot be used here, because what is under test is
+    # the deadline itself.
+    started = :ets.new(:loader, [:public])
 
-    assert_receive {:loading, loader}, 5_000
-    reference = Process.monitor(loader)
-    assert_receive {:DOWN, ^reference, :process, ^loader, _killed}, 5_000
+    loader = fn ->
+      :ets.insert(started, {:loader, self()})
+
+      receive do
+        :never -> {:ok, :unreachable}
+      end
+    end
+
+    assert {:error, :timeout} = Trust.load(loader, deadline(500))
+
+    case :ets.lookup(started, :loader) do
+      [{:loader, pid}] ->
+        reference = Process.monitor(pid)
+        assert_receive {:DOWN, ^reference, :process, ^pid, _killed}, 5_000
+
+      [] ->
+        :ok
+    end
+  end
+
+  test "reports a loader that exits without answering" do
+    # A normal exit does not travel down a link, so this is the case the
+    # guardian's monitor exists for.
+    assert Trust.load(fn -> exit(:normal) end, deadline(5_000)) == {:error, :no_trust_store}
   end
 
   test "leaves nothing in the caller's mailbox after giving up" do

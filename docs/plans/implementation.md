@@ -1302,6 +1302,12 @@ versions the HTTP/provider partitions.
   `docs/transport-backend.md`, enforced in `mix.exs`, and exercised by CI.
 - Deferred per-role heap ceilings to Slice 2 with the measurements and the two
   hazards that make them a runtime-wide decision rather than a socket option.
+- Left one residual for Slice 2: closing a TLS socket does not wait for the
+  peer, but it is a call into the `:ssl` connection process and inherits that
+  call's five-second ceiling. No peer that reaches it was found. A teardown
+  budget that does not depend on `:ssl` answering belongs with the slice that
+  owns attempt processes, where killing the owner already closes the socket
+  immediately.
 
 Exit met: the backend contract holds on macOS locally and on Linux, macOS, and
 the minimum OTP in CI. No public API and no HTTP request exists yet; the

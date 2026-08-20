@@ -12,7 +12,12 @@ defmodule PtcLlmHttp.Transport.TlsTest do
   # `unknown_ca` on 27, and the same misnamed host is `handshake_failure` on 26
   # and `bad_certificate` on 29. Every rejection here therefore asserts that the
   # handshake failed on the certificate, never which atom said so.
-  @certificate_rejected [:bad_certificate, :handshake_failure, :unknown_ca]
+  @certificate_rejected [
+    :bad_certificate,
+    :certificate_expired,
+    :handshake_failure,
+    :unknown_ca
+  ]
 
   def start_peer, do: start_peer(Certificates.build())
 
@@ -82,7 +87,8 @@ defmodule PtcLlmHttp.Transport.TlsTest do
 
       server = start_peer(Certificates.build(validity: validity))
 
-      assert {:error, {:tls, :certificate_expired}} = open(server, deadline(5_000))
+      assert {:error, {:tls, alert}} = open(server, deadline(5_000))
+      assert alert in @certificate_rejected
     end
 
     test "accepts a chain at the depth limit and rejects one beyond it" do

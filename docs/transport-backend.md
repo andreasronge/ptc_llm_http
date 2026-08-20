@@ -126,6 +126,7 @@ certificate is not a chain, it is a payload.
 | Connection process dies in an orderly way | `:ssl` reports `{:error, :closed}` itself |
 | Connection process hard-killed under a call **(tested)** | the exit is caught and reported as `{:transport, :process_exit}` |
 | Closing **(tested)** | does not wait for the peer's close notification, and the peer still sees the connection go |
+| Closing against a peer that is suspended or killed outright | returns in under a millisecond on OTP 26 and 29, with and without an explicit zero wait |
 
 Alert names are not a stable interface, and this is not a theory: the same
 misnamed host is `handshake_failure` on OTP 26 and `bad_certificate` on OTP 29,
@@ -141,6 +142,25 @@ locations and peer-supplied text, and an `{:options, _}` error carries the
 option list with the private key in it. Neither travels: callers see
 `{:tls, alert_name}` or `{:transport, reason}` and nothing else. `:ssl`'s own
 `log_level` is set to `:none` for the same reason.
+
+### What closing does and does not bound
+
+`:ssl.close/2` is called with a zero wait, because this connection carried
+`Connection: close` and will never be reused: waiting for the peer's own close
+notification buys nothing and lets a peer that withholds one hold cleanup open.
+
+It is not a hard latency bound, and should not be read as one. Closing is a
+call into the connection process, and that call carries OTP's five-second
+default, so a connection process that cannot answer could hold a caller for
+that long. A peer that would cause it was not found — suspending the peer's
+processes outright, killing them, and filling the send queue all return in
+under a millisecond on both OTP 26 and 29 — but "not found" is not "impossible".
+
+The bound that does hold structurally is ownership: the socket dies with the
+process that opened it, immediately and regardless of the peer, which is
+tested. A teardown budget that does not depend on `:ssl` answering therefore
+belongs with the runtime slice that owns the attempt's processes, where killing
+the owner is already the mechanism.
 
 ### Verification against a pinned address
 
