@@ -7,6 +7,13 @@ defmodule PtcLlmHttp.Transport.TlsTest do
 
   @loopback {127, 0, 0, 1}
 
+  # Which alert a rejected certificate produces is not stable across OTP
+  # releases: the same over-deep chain is `handshake_failure` on 26 and 29 and
+  # `unknown_ca` on 27, and the same misnamed host is `handshake_failure` on 26
+  # and `bad_certificate` on 29. Every rejection here therefore asserts that the
+  # handshake failed on the certificate, never which atom said so.
+  @certificate_rejected [:bad_certificate, :handshake_failure, :unknown_ca]
+
   def start_peer, do: start_peer(Certificates.build())
 
   def start_peer(bundle) do
@@ -49,12 +56,8 @@ defmodule PtcLlmHttp.Transport.TlsTest do
     test "rejects a certificate that does not name the host asked for" do
       server = start_peer(Certificates.build(names: ["elsewhere.example"]))
 
-      # Which alert a rejected certificate produces is not stable across OTP
-      # releases -- 26 sends `handshake_failure` where 29 sends
-      # `bad_certificate` -- so the contract is that it fails, and callers
-      # classify by kind rather than by alert name.
       assert {:error, {:tls, alert}} = open(server, deadline(5_000))
-      assert alert in [:bad_certificate, :handshake_failure]
+      assert alert in @certificate_rejected
     end
 
     test "rejects a certificate that names the host only in its common name" do
@@ -63,7 +66,7 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       server = start_peer(Certificates.build(names: [], common_name: "localhost"))
 
       assert {:error, {:tls, alert}} = open(server, deadline(5_000))
-      assert alert in [:bad_certificate, :handshake_failure]
+      assert alert in @certificate_rejected
     end
 
     test "rejects a chain that no trusted authority signed" do
@@ -71,7 +74,7 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       server = start_peer(Certificates.build(trusted_by: [stranger.authority]))
 
       assert {:error, {:tls, alert}} = open(server, deadline(5_000))
-      assert alert in [:unknown_ca, :bad_certificate]
+      assert alert in @certificate_rejected
     end
 
     test "rejects an expired certificate" do
@@ -93,7 +96,8 @@ defmodule PtcLlmHttp.Transport.TlsTest do
           id: :beyond
         )
 
-      assert {:error, {:tls, :handshake_failure}} = open(beyond, deadline(5_000))
+      assert {:error, {:tls, alert}} = open(beyond, deadline(5_000))
+      assert alert in @certificate_rejected
     end
 
     test "rejects a certificate chain too large to reassemble within the bound" do
@@ -102,7 +106,8 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       assert Certificates.chain_size(oversized) > 200_000
       server = start_peer(oversized)
 
-      assert {:error, {:tls, :handshake_failure}} = open(server, deadline(5_000))
+      assert {:error, {:tls, alert}} = open(server, deadline(5_000))
+      assert alert in @certificate_rejected
     end
 
     test "accepts a large chain that still fits inside the bound" do
@@ -185,8 +190,8 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       # `:ssl` skips a CA it cannot decode rather than refusing the option, so
       # the failure surfaces as a chain that nothing vouches for. Either way it
       # must fail; what it must not do is proceed.
-      assert {:error, {:tls, :unknown_ca}} =
-               open(server, deadline(5_000), trust: ["not a certificate"])
+      assert {:error, {:tls, alert}} = open(server, deadline(5_000), trust: ["not a certificate"])
+      assert alert in @certificate_rejected
     end
 
     test "does not start loading platform trust once the deadline has passed" do

@@ -5,7 +5,7 @@ on, and of the measurements behind them. The spike that produced it is gone;
 the numbers, the contract, and the tests that keep both honest are not.
 
 Measured on macOS 15.3 (arm64) with Erlang/OTP 29.0.3 and Elixir 1.20.2, and
-re-run in full on Linux with OTP 26.2.5 and Elixir 1.18.4.
+re-run in full on Linux with OTP 26.2.5 and OTP 27.3.4.
 
 Two kinds of row appear below, and the difference matters. Rows marked
 **(tested)** describe this package's own behavior and are assertions in
@@ -120,15 +120,21 @@ certificate is not a chain, it is a payload.
 | Owner killed mid-handshake **(tested)** | the peer observes the close; nothing is left behind |
 | Peer closes after partial data **(tested)** | buffered bytes are delivered first, then `{:error, :closed}` |
 | Peer process killed abruptly, no close notification (TLS) **(tested)** | `{:error, :closed}`, no truncation-specific reason |
-| Certificate names another host **(tested)** | rejected; the alert *name* differs by release (OTP 26 sends `handshake_failure`, OTP 29 `bad_certificate`) |
+| Certificate names another host **(tested)** | rejected; the alert *name* differs by release |
+| Chain deeper than `depth` **(tested)** | rejected; the alert *name* differs by release |
 | ALPN with no overlap **(tested)** | `{:tls, :no_application_protocol}`; no other protocol is ever negotiated |
 | Connection process dies in an orderly way | `:ssl` reports `{:error, :closed}` itself |
 | Connection process hard-killed under a call **(tested)** | the exit is caught and reported as `{:transport, :process_exit}` |
+| Closing **(tested)** | does not wait for the peer's close notification, and the peer still sees the connection go |
 
-Alert names are not a stable interface. The same rejected certificate produces
-different alerts on different OTP releases, so the error mapping a consumer
-sees must classify by kind — the handshake failed, verification failed — and
-must not switch on the alert atom. The atom is a diagnostic, not a contract.
+Alert names are not a stable interface, and this is not a theory: the same
+misnamed host is `handshake_failure` on OTP 26 and `bad_certificate` on OTP 29,
+and the same over-deep chain is `handshake_failure` on 26 and 29 but
+`unknown_ca` on 27. Both were found by running the suite on each release. The
+error mapping a consumer sees must therefore classify by kind — the handshake
+failed, the peer could not be verified — and must never switch on the alert
+atom. The atom is a diagnostic, not a contract, and the tests assert it the
+same way.
 
 An alert's second element is a description string carrying OTP source
 locations and peer-supplied text, and an `{:options, _}` error carries the

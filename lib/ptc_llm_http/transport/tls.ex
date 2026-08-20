@@ -15,6 +15,7 @@ defmodule PtcLlmHttp.Transport.Tls do
   @behaviour PtcLlmHttp.Transport.SocketBackend
 
   alias PtcLlmHttp.Transport.SocketBackend
+  alias PtcLlmHttp.Transport.Trust
 
   @enforce_keys [:socket]
   defstruct [:socket, leftover: <<>>]
@@ -131,11 +132,16 @@ defmodule PtcLlmHttp.Transport.Tls do
 
   @impl SocketBackend
   def close(%__MODULE__{} = state) do
-    # Closing is the one operation with nothing left to report to: a peer that
-    # mishandles the shutdown, and a connection process that dies during it,
-    # both mean the same thing to the caller. Swallowing that here is what
-    # makes cleanup safe to run on every exit path.
-    guard(fn -> :ssl.close(state.socket) end)
+    # The zero is not impatience, it is the contract: this connection carried
+    # `Connection: close` and will never be reused, so waiting for the peer's
+    # own close notification buys nothing and lets a peer that withholds it
+    # hold cleanup open. `:ssl.close/1` would wait.
+    #
+    # Closing is also the one operation with nothing left to report to: a peer
+    # that mishandles the shutdown, and a connection process that dies during
+    # it, mean the same thing to a caller that is already leaving. Swallowing
+    # both is what makes cleanup safe to run on every exit path.
+    guard(fn -> :ssl.close(state.socket, 0) end)
     :ok
   end
 
@@ -159,47 +165,12 @@ defmodule PtcLlmHttp.Transport.Tls do
   defp authorities([], _deadline), do: {:error, :no_trust_store}
 
   # The platform store is read and parsed on the first call in the node's life,
-  # and that call reaches the filesystem. It runs in a monitored worker the
-  # caller abandons at the deadline, because a store that will not answer must
-  # not hold an attempt open past the time it was given. Later calls hit OTP's
+  # and that call reaches the filesystem, so it goes through `Trust`: the
+  # attempt keeps its deadline, the caller cannot be taken down by it, and a
+  # caller that dies first does not leave it running. Later calls hit OTP's
   # cache and return immediately.
-  #
-  # The worker is monitored rather than linked: reading trust material is the
-  # one thing here that runs foreign code, and it must not be able to take a
-  # caller with it.
-  defp authorities(:system, deadline) do
-    with {:ok, timeout} <- SocketBackend.remaining(deadline) do
-      caller = self()
-      reply = make_ref()
-      {worker, monitor} = spawn_monitor(fn -> send(caller, {reply, system_authorities()}) end)
-
-      receive do
-        {^reply, authorities} ->
-          Process.demonitor(monitor, [:flush])
-          authorities
-
-        {:DOWN, ^monitor, :process, ^worker, _store_unreadable} ->
-          {:error, :no_trust_store}
-      after
-        timeout -> abandon(worker, monitor, reply)
-      end
-    end
-  end
-
-  defp abandon(worker, monitor, reply) do
-    Process.exit(worker, :kill)
-    Process.demonitor(monitor, [:flush])
-
-    # It may have answered in the moment before it was killed; that reply
-    # belongs to an attempt that is already over.
-    receive do
-      {^reply, _too_late} -> :ok
-    after
-      0 -> :ok
-    end
-
-    {:error, :timeout}
-  end
+  defp authorities(:system, deadline),
+    do: Trust.load(&system_authorities/0, deadline)
 
   # `cacerts_get/0` raises when it cannot read a store, and returns an empty
   # list when it read one that holds nothing. Both are the same thing to a

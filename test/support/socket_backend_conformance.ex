@@ -134,9 +134,12 @@ defmodule PtcLlmHttp.Test.SocketBackendConformance do
       end
 
       test "reports closure once the caller has closed the socket itself" do
-        {_server, socket} = connected()
+        {server, socket} = connected()
         assert :ok = @backend.close(socket)
 
+        # The peer learns of it too: closing does not wait for the peer's own
+        # shutdown, but it does deliver one.
+        assert :ok = RawServer.await_close(server, 5_000)
         assert {:error, :closed} = @backend.recv_up_to(socket, 4_096, deadline(5_000))
       end
 
