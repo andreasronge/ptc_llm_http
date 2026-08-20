@@ -106,6 +106,11 @@ defmodule PtcLlmHttp.MixProject do
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      # Pulls Igniter, and through it Req/Finch/Mint, into the dev lock. They
+      # are transitive dev tooling, never compiled into this application and
+      # never reachable from `lib/`. Their presence in mix.lock is not
+      # permission to use an HTTP client here: this package implements the
+      # transport it needs. `scripts/ci/minimum-elixir.sh` enforces that.
       {:usage_rules, "~> 1.2", only: :dev, runtime: false}
     ]
   end

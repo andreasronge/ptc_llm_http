@@ -91,6 +91,9 @@ named gate that runs it:
 | `:release` | Requires an assembled release or built package | `release-package` job, `mix full_check` |
 | `:soak` | Long-running resource/leak trend suite | `mix soak` |
 
+`mix soak` exits non-zero with "no test was executed" until the first `:soak`
+test lands; the resource and soak suite arrives with Slice 7.
+
 Never exclude a tag merely because it is slow. The per-commit gate is kept
 small by moving *platform* work out, not by dropping coverage.
 
