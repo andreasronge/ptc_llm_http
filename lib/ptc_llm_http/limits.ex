@@ -9,6 +9,18 @@ defmodule PtcLlmHttp.Limits do
   @bearer_bytes 16_376
   @encoded_request_bytes 1_048_576
   @wire_response_bytes 1_048_576
+  @header_name_bytes 128
+  @header_value_bytes 16_384
+  @request_header_fields 64
+  @request_head_bytes 65_536
+  @response_line_bytes 16_384
+  @response_head_bytes 65_536
+  @response_header_fields 128
+  @informational_responses 8
+  @chunk_line_bytes 1_024
+  @trailer_bytes 16_384
+  @trailer_fields 64
+  @dns_addresses 8
   @connect_policy_cidrs 32
   @process_budget_min 100_000
   @process_budget_max 2_073_600_000
@@ -24,6 +36,18 @@ defmodule PtcLlmHttp.Limits do
   def bearer_bytes, do: @bearer_bytes
   def encoded_request_bytes, do: @encoded_request_bytes
   def wire_response_bytes, do: @wire_response_bytes
+  def header_name_bytes, do: @header_name_bytes
+  def header_value_bytes, do: @header_value_bytes
+  def request_header_fields, do: @request_header_fields
+  def request_head_bytes, do: @request_head_bytes
+  def response_line_bytes, do: @response_line_bytes
+  def response_head_bytes, do: @response_head_bytes
+  def response_header_fields, do: @response_header_fields
+  def informational_responses, do: @informational_responses
+  def chunk_line_bytes, do: @chunk_line_bytes
+  def trailer_bytes, do: @trailer_bytes
+  def trailer_fields, do: @trailer_fields
+  def dns_addresses, do: @dns_addresses
   def connect_policy_cidrs, do: @connect_policy_cidrs
   def process_budget_min, do: @process_budget_min
   def process_budget_max, do: @process_budget_max

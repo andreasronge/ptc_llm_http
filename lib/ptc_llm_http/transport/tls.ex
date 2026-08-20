@@ -15,7 +15,6 @@ defmodule PtcLlmHttp.Transport.Tls do
   @behaviour PtcLlmHttp.Transport.SocketBackend
 
   alias PtcLlmHttp.Transport.SocketBackend
-  alias PtcLlmHttp.Transport.Trust
 
   @enforce_keys [:socket]
   defstruct [:socket, leftover: <<>>]
@@ -25,11 +24,11 @@ defmodule PtcLlmHttp.Transport.Tls do
   @typedoc """
   Certificate authorities to verify the peer against.
 
-  `:system` is the OTP-held platform trust store: in-memory, present inside an
-  assembled release, and never a file this package ships. A host without one
-  fails the connection with `:no_trust_store`; there is no unverified fallback.
+  The HTTP runtime resolves the OTP-held platform store inside its bounded DNS
+  role and passes the resulting DER authorities here. An empty list fails with
+  `:no_trust_store`; there is no unverified fallback.
   """
-  @type trust :: :system | [binary()]
+  @type trust :: [binary()]
 
   # Intermediate CAs allowed between the peer certificate and a trusted root.
   # Real chains carry one or two, cross-signed ones a few more. The value
@@ -86,13 +85,32 @@ defmodule PtcLlmHttp.Transport.Tls do
   `:trust` selects the certificate authorities.
   """
   @impl SocketBackend
-  def connect(%{address: address, port: port, hostname: hostname, trust: trust}, deadline)
+  def connect(%{address: address, port: port, hostname: hostname, trust: trust} = spec, deadline)
       when is_tuple(address) and is_integer(port) and port in 1..65_535 and is_binary(hostname) do
-    with {:ok, cacerts} <- authorities(trust, deadline),
-         {:ok, timeout} <- SocketBackend.remaining(deadline) do
-      case handshake(address, port, options(hostname, cacerts), timeout) do
-        {:ok, socket} -> {:ok, %__MODULE__{socket: socket}}
-        {:error, reason} -> {:error, reason}
+    progress = Map.get(spec, :progress)
+
+    connect_tcp(
+      address,
+      port,
+      hostname,
+      trust,
+      progress || fn _phase, _dispatch -> :ok end,
+      deadline
+    )
+  end
+
+  defp connect_tcp(address, port, hostname, trust, progress, deadline) do
+    with {:ok, _remaining} <- SocketBackend.remaining(deadline),
+         {:ok, cacerts} <- authorities(trust),
+         {:ok, timeout} <- SocketBackend.remaining(deadline),
+         {:ok, tcp_socket} <- tcp_connect(address, port, timeout) do
+      case upgrade(tcp_socket, hostname, cacerts, progress, deadline) do
+        {:ok, socket} ->
+          {:ok, %__MODULE__{socket: socket}}
+
+        {:error, reason} ->
+          _closed = :gen_tcp.close(tcp_socket)
+          {:error, reason}
       end
     end
   end
@@ -161,37 +179,37 @@ defmodule PtcLlmHttp.Transport.Tls do
     ] ++ @options
   end
 
-  defp authorities([_ | _] = cacerts, _deadline), do: {:ok, cacerts}
-  defp authorities([], _deadline), do: {:error, :no_trust_store}
+  defp authorities([_ | _] = cacerts), do: {:ok, cacerts}
+  defp authorities(_trust), do: {:error, :no_trust_store}
 
-  # The platform store is read and parsed on the first call in the node's life,
-  # and that call reaches the filesystem, so it goes through `Trust`: the
-  # attempt keeps its deadline, the caller cannot be taken down by it, and a
-  # caller that dies first does not leave it running. Later calls hit OTP's
-  # cache and return immediately.
-  defp authorities(:system, deadline),
-    do: Trust.load(&system_authorities/0, deadline)
-
-  # `cacerts_get/0` raises when it cannot read a store, and returns an empty
-  # list when it read one that holds nothing. Both are the same thing to a
-  # caller: there is nothing to verify against, and verifying against nothing
-  # is not an option this package offers.
-  defp system_authorities do
-    case :public_key.cacerts_get() do
-      [_ | _] = cacerts -> {:ok, cacerts}
-      [] -> {:error, :no_trust_store}
-    end
-  catch
-    :error, _unreadable_store -> {:error, :no_trust_store}
-  end
-
-  defp handshake(address, port, options, timeout) do
+  defp tcp_connect(address, port, timeout) do
     guard(fn ->
-      case :ssl.connect(address, port, options, timeout) do
+      tcp_options = [
+        :binary,
+        packet: :raw,
+        active: false,
+        nodelay: true,
+        send_timeout_close: true,
+        buffer: SocketBackend.max_chunk()
+      ]
+
+      case :gen_tcp.connect(address, port, tcp_options, timeout) do
         {:ok, socket} -> {:ok, socket}
         {:error, reason} -> {:error, SocketBackend.classify(reason)}
       end
     end)
+  end
+
+  defp upgrade(tcp_socket, hostname, cacerts, progress, deadline) do
+    with :ok <- progress.(:tls, :not_sent),
+         {:ok, timeout} <- SocketBackend.remaining(deadline) do
+      guard(fn ->
+        case :ssl.connect(tcp_socket, options(hostname, cacerts), timeout) do
+          {:ok, socket} -> {:ok, socket}
+          {:error, reason} -> {:error, SocketBackend.classify(reason)}
+        end
+      end)
+    end
   end
 
   # Options are this module's own and always well formed, so the only way a

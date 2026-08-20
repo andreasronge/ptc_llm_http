@@ -8,7 +8,7 @@ defmodule PtcLlmHttp.Runtime do
   failure fences old counters instead of resetting them under surviving work.
   """
 
-  alias PtcLlmHttp.{Deadline, Error, Limits, ProcessBudget}
+  alias PtcLlmHttp.{Deadline, Error, Limits, ProcessBudget, Target}
 
   alias PtcLlmHttp.Runtime.{
     Admission,
@@ -88,6 +88,23 @@ defmodule PtcLlmHttp.Runtime do
         ) :: {:ok, term()} | {:error, Error.t()}
   def run_attempt(runtime, group, budget, deadline, operation)
       when is_pid(runtime) and is_binary(group) and is_function(operation, 0) do
+    run_owned_attempt(runtime, group, budget, deadline, operation)
+  end
+
+  def run_attempt(_runtime, _group, _budget, _deadline, _operation),
+    do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
+
+  @doc false
+  def run_http(runtime, %Target{} = target, budget, deadline, {:http, spec})
+      when is_pid(runtime) and is_map(spec) do
+    operation = {:http, Map.put(spec, :deadline, deadline)}
+    run_owned_attempt(runtime, Target.capacity_group(target), budget, deadline, operation)
+  end
+
+  def run_http(_runtime, _target, _budget, _deadline, _operation),
+    do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
+
+  defp run_owned_attempt(runtime, group, budget, deadline, operation) do
     with {:ok, budget} <- ProcessBudget.validate(budget),
          {:ok, deadline} <- Deadline.validate(deadline),
          {:ok, _remaining} <- Deadline.remaining(deadline),
@@ -115,9 +132,6 @@ defmodule PtcLlmHttp.Runtime do
       {:error, error} -> {:error, error}
     end
   end
-
-  def run_attempt(_runtime, _group, _budget, _deadline, _operation),
-    do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
 
   @doc false
   def components(runtime), do: runtime_components(runtime)

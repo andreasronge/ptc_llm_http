@@ -200,22 +200,6 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       assert alert in @certificate_rejected
     end
 
-    test "does not start loading platform trust once the deadline has passed" do
-      server = start_peer()
-
-      assert {:error, :timeout} = open(server, expired_deadline(), trust: :system)
-      assert RawServer.connection_count(server) == 0
-    end
-
-    test "reaches the platform trust store rather than failing for want of one" do
-      server = start_peer()
-
-      # The fixture's private authority is not in the platform store, so the
-      # handshake must fail on the certificate — never on a missing store,
-      # which is what a release without usable trust material would report.
-      assert {:error, {:tls, _alert}} = open(server, deadline(5_000), trust: :system)
-    end
-
     test "reports a connection process killed under a read instead of exiting the caller" do
       {_server, socket} = connected()
 

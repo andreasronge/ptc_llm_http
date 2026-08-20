@@ -3,7 +3,8 @@ defmodule PtcLlmHttp.RuntimeTest do
 
   alias PtcLlmHttp.{Deadline, Error, Limits, ProcessBudget, Runtime}
   alias PtcLlmHttp.Runtime.{Admission, AttemptTree, Coordinator, Guardian, Role}
-  alias PtcLlmHttp.Test.ScriptedBackend
+  alias PtcLlmHttp.Test.{RawServer, ScriptedBackend}
+  alias PtcLlmHttp.Transport.Tcp
 
   test "validates runtime-wide and group ceilings before starting" do
     assert {:ok, runtime} = Runtime.start_link(groups: %{"group" => 1}, max_concurrency: 1)
@@ -592,6 +593,164 @@ defmodule PtcLlmHttp.RuntimeTest do
     refute_receive :operation_dispatched_without_ack
     GenServer.stop(coordinator)
     GenServer.stop(socket)
+  end
+
+  test "a progress acknowledgement cannot hold an open socket past its deadline" do
+    server = start_supervised!({RawServer, [transport: :tcp]})
+    parent = self()
+
+    guardian =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", _from, {:progress, _generation, _attempt_id, :tls, :not_sent}} ->
+            send(parent, :guardian_progress_blocked)
+
+            receive do
+              :never -> :ok
+            end
+        end
+      end)
+
+    {:ok, coordinator} = Coordinator.start_link(100_000)
+    {:ok, progress_deadline} = Deadline.new(System.monotonic_time(:millisecond) + 150)
+    operation_ref = make_ref()
+
+    :ok =
+      Coordinator.bind(coordinator, %{
+        guardian: guardian,
+        generation: make_ref(),
+        attempt_id: make_ref(),
+        caller: self(),
+        deadline: progress_deadline,
+        roles: %{}
+      })
+
+    :sys.replace_state(coordinator, fn state ->
+      %{state | operation_ref: operation_ref, mode: :http}
+    end)
+
+    task =
+      Task.async(fn ->
+        {:ok, socket} =
+          Tcp.connect(
+            %{address: {127, 0, 0, 1}, port: RawServer.port(server)},
+            Deadline.monotonic_millisecond(progress_deadline)
+          )
+
+        try do
+          Coordinator.transport_progress(
+            coordinator,
+            operation_ref,
+            progress_deadline,
+            :tls,
+            :not_sent
+          )
+        after
+          Tcp.close(socket)
+        end
+      end)
+
+    assert :ok = RawServer.await_connection(server)
+    assert_receive :guardian_progress_blocked
+    assert {:error, :runtime_unavailable} = Task.await(task, 1_000)
+    assert :ok = RawServer.await_close(server, 1_000)
+    Process.exit(guardian, :kill)
+    Process.exit(coordinator, :kill)
+  end
+
+  test "expiry during initial HTTP progress reports the deadline instead of wedging" do
+    parent = self()
+
+    guardian =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", progress_from, {:progress, generation, attempt_id, :dns, :not_sent}} ->
+            Process.send_after(self(), {:finish_progress, progress_from}, 100)
+
+            receive do
+              {:finish_progress, ^progress_from} ->
+                GenServer.reply(progress_from, {:error, :runtime_unavailable})
+            end
+
+            receive do
+              {:"$gen_call", cause_from, {:cause, ^generation, ^attempt_id, :deadline_exceeded}} ->
+                send(parent, :initial_progress_deadline_reported)
+                GenServer.reply(cause_from, :ok)
+            end
+        end
+      end)
+
+    {:ok, coordinator} = Coordinator.start_link(100_000)
+    {:ok, short_deadline} = Deadline.new(System.monotonic_time(:millisecond) + 50)
+
+    :ok =
+      Coordinator.bind(coordinator, %{
+        guardian: guardian,
+        generation: make_ref(),
+        attempt_id: make_ref(),
+        caller: self(),
+        deadline: short_deadline,
+        roles: %{}
+      })
+
+    Coordinator.execute(coordinator, {:http, %{}})
+    assert_receive :initial_progress_deadline_reported, 1_000
+    Process.exit(guardian, :kill)
+    Process.exit(coordinator, :kill)
+  end
+
+  test "the cleanup bound cannot masquerade as a later operation deadline" do
+    parent = self()
+
+    guardian =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", _progress_from, {:progress, generation, attempt_id, :connect, :not_sent}} ->
+            send(parent, :long_deadline_progress_blocked)
+
+            receive do
+              {:"$gen_call", _cause_from, {:cause, ^generation, ^attempt_id, :deadline_exceeded}} ->
+                send(parent, :false_deadline_reported)
+            end
+        end
+      end)
+
+    guardian_monitor = Process.monitor(guardian)
+    {:ok, coordinator} = Coordinator.start_link(100_000)
+    {:ok, long_deadline} = Deadline.new(System.monotonic_time(:millisecond) + 5_000)
+    operation_ref = make_ref()
+
+    :ok =
+      Coordinator.bind(coordinator, %{
+        guardian: guardian,
+        generation: make_ref(),
+        attempt_id: make_ref(),
+        caller: self(),
+        deadline: long_deadline,
+        roles: %{}
+      })
+
+    :sys.replace_state(coordinator, fn state ->
+      %{state | operation_ref: operation_ref, mode: :http}
+    end)
+
+    task =
+      Task.async(fn ->
+        Coordinator.transport_progress(
+          coordinator,
+          operation_ref,
+          long_deadline,
+          :connect,
+          :not_sent
+        )
+      end)
+
+    assert_receive :long_deadline_progress_blocked
+    assert {:error, :runtime_unavailable} = Task.await(task, 2_000)
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :killed}, 2_000
+    refute_receive :false_deadline_reported
+    assert {:ok, _remaining} = Deadline.remaining(long_deadline)
+    Process.exit(coordinator, :kill)
   end
 
   test "a timed-out provisional reservation reports the deadline and kills its generation" do
