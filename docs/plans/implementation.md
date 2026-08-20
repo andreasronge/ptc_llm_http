@@ -2,9 +2,11 @@
 
 **Status:** active implementation plan; cross-project review incorporated
 2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
-`bae77e0` with follow-up CI/tooling commits through `cebdd8f`; no network call is
-possible yet. Slice 1 is next. It must replace this audit note with the selected
-minimum OTP release and the bounded TLS-backend decision before Slice 2 begins.
+`bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
+the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
+is OTP 26, and the trust source is OTP's in-memory platform store. The retained
+contract and its measurements are in `docs/transport-backend.md`. There is no
+public API and no HTTP request yet; Slice 2 is next.
 
 ## Goal
 
@@ -92,10 +94,11 @@ adapter is intentionally thin and remains in PtcRunner.
   or Git commit during pre-release integration and never follows a moving
   branch. Its published production package requires a published Hex version of
   `ptc_llm_http`.
-- Elixir declaration should initially match PtcRunner's `~> 1.15`. The minimum
-  OTP release is not guessed: the transport spike establishes it from the
-  required `:socket` and `:ssl` behavior, and CI tests that declared minimum
-  plus PtcRunner's current Elixir 1.20.2 / OTP 29.0.3 environment.
+- Elixir declaration matches PtcRunner's `~> 1.15`. The minimum release is
+  Erlang/OTP 26, established by the transport spike from the `:ssl` and
+  `:gen_tcp` behavior the bounded read and handshake contract requires, and
+  enforced in `mix.exs`. CI runs the transport suite on that floor and on
+  PtcRunner's current Elixir 1.20.2 / OTP 29.0.3 environment.
 - Runtime dependencies stay minimal. `Jason` is allowed for JSON. Req, Finch,
   Mint, an HTTP server, a model database, and a provider SDK are not runtime
   dependencies.
@@ -825,56 +828,20 @@ Address selection must be deterministic and documented. If dual-stack
 fallback is desired later, it is multiple attempts and requires an explicit
 attempt budget; it is not smuggled into DNS/connect behavior.
 
-## Transport spike: the first technical gate
+## Transport spike: passed
 
-Before implementing the HTTP parser, prove the socket backend contract with a
-disposable spike and tests. The backend operation is conceptually:
+The backend contract is settled and its record lives in
+`docs/transport-backend.md`: pure OTP `:gen_tcp` and `:ssl` in passive mode,
+with `recv_up_to/3` built from a capped `recv(socket, 0, timeout)` rather than
+an exact-size or uncapped read, and no port helper. The conformance suite in
+`test/ptc_llm_http/transport/` runs the whole spike matrix against scripted
+local TCP and TLS peers on every commit, and on Linux, macOS, and the minimum
+OTP in CI.
 
-```elixir
-recv_up_to(socket, positive_max_bytes, absolute_deadline)
-```
-
-It must:
-
-- return promptly after one or more bytes are available;
-- never return more than the requested maximum;
-- preserve unread bytes for later calls;
-- distinguish timeout, closure, and transport error;
-- be cancellable by owner death; and
-- behave the same for TCP and verified TLS.
-
-Plain TCP should evaluate OTP `:socket` nowait/select operation. TLS must test
-the actual supported `:ssl` API rather than assume that an exact positive-size
-read or a zero-length read has the needed cap and promptness semantics.
-
-The spike matrix includes:
-
-- one byte delivered while the caller asks for 4 KiB;
-- a 64 KiB write while the caller asks for 1 KiB;
-- a payload split across many TLS records;
-- deadline before first byte and between chunks;
-- peer close before and after partial data;
-- caller death during DNS, TCP connect, TLS handshake, and receive;
-- repeated reads proving no loss or duplication;
-- an oversized or deeply chained certificate fixture; and
-- measured/verified allocation behavior for TLS handshake records and the
-  peer certificate chain before application-data reads begin.
-
-If OTP TLS cannot satisfy both prompt partial delivery and the exact maximum,
-stop the pure-Elixir transport slice and choose explicitly between:
-
-1. a small repository-owned capped, length-framed port helper; or
-2. revising the package security/streaming contract with PtcRunner maintainers.
-
-Do not silently use `recv(..., 0)`, an exact-size blocking read, Mint/Finch, or
-an unbounded helper. A port helper expands the project scope: it requires
-frame-size validation before BEAM allocation, stderr capture, process-group
-cleanup, checksum/release packaging, and Linux/macOS x64/arm64 CI.
-
-If supported OTP SSL configuration cannot bound handshake/certificate input
-within the accepted resource model, the pure-OTP backend fails this gate even
-when application-data `recv_up_to` is bounded. The selected capped helper, if
-any, must enforce the handshake-side bound too.
+The stop condition it existed to test — an API that can only block for the
+requested maximum or deliver an unbounded record — did not fire. Handshake
+input is bounded by `max_handshake_size` and `depth`; application data by the
+pinned `buffer` and passive-mode flow control.
 
 ## TLS and trust
 
@@ -889,11 +856,14 @@ HTTPS requires:
 - a documented packaged trust source that works in a standalone release; and
 - no secret-bearing debug logging from `:ssl` options or errors.
 
-The trust-source spike compares OTP/platform CA access and a small CA bundle
-dependency. Prefer in-memory CA data. If a file path is necessary, package and
-verify it as a release asset and test a release without development files.
-Target-specific custom CAs are deferred until a real deployment needs them;
-they require an explicit opaque trust input, not ambient environment lookup.
+The trust source is settled: `:public_key.cacerts_get/0`, the platform store
+OTP holds in memory. No CA bundle is packaged and no CA dependency is added; a
+host without usable trust material fails the connection with a typed
+`:no_trust_store` rather than falling back. The release smoke proves it is
+reachable inside an assembled release. Callers may pass their own DER
+authorities; target-specific custom CAs are deferred until a real deployment
+needs them, and will require an explicit opaque trust input rather than an
+ambient environment lookup.
 
 ## Request serialization
 
@@ -1314,18 +1284,34 @@ constructor/redaction tests belong to Slice 2. The base closed error type and
 runtime/resource contract entries also belong to Slice 2; Slice 4 completes and
 versions the HTTP/provider partitions.
 
-### Slice 1 — socket/TLS feasibility spike
+### Slice 1 — socket/TLS feasibility spike — complete
 
-- Implement disposable TCP/TLS `recv_up_to` probes and the full spike matrix.
-- Prove acceptable handshake/certificate-chain allocation bounds, including an
-  oversized-chain fixture.
-- Decide pure OTP versus capped port helper.
-- Fix the minimum OTP and release trust-source strategy.
-- Delete disposable probe code that is not part of the selected backend; keep
-  the conformance tests.
+- Selected the pure-OTP backend: `PtcLlmHttp.Transport.SocketBackend` with
+  `Tcp` and `Tls` implementations, passive mode, one arrival cap of 16 KiB, and
+  no port helper. Probe code for the rejected shapes was never committed.
+- Landed one conformance suite covering the full spike matrix — prompt partial
+  delivery, exact caps, leftover preservation, deadlines before and between
+  chunks, peer close either side of data, owner death, one connection per
+  attempt, flow control, and read/write fragmentation as a property — run
+  against scripted local TCP and TLS peers.
+- Proved the handshake bounds against generated chains: `depth` rejects an
+  over-long chain, and `max(16 KiB, max_handshake_size)` rejects a 200 KiB
+  certificate while admitting a 20 KiB one.
+- Fixed the minimum release at OTP 26 and the trust source at
+  `:public_key.cacerts_get/0`; both are recorded in
+  `docs/transport-backend.md`, enforced in `mix.exs`, and exercised by CI.
+- Deferred per-role heap ceilings to Slice 2 with the measurements and the two
+  hazards that make them a runtime-wide decision rather than a socket option.
+- Left one residual for Slice 2: closing a TLS socket does not wait for the
+  peer, but it is a call into the `:ssl` connection process and inherits that
+  call's five-second ceiling. No peer that reaches it was found. A teardown
+  budget that does not depend on `:ssl` answering belongs with the slice that
+  owns attempt processes, where killing the owner already closes the socket
+  immediately.
 
-Exit: backend feasibility is proven on Linux and macOS, or the project stops
-with a documented blocker before building on an unsafe primitive.
+Exit met: the backend contract holds on macOS locally and on Linux, macOS, and
+the minimum OTP in CI. No public API and no HTTP request exists yet; the
+backends are internal and carry redacted `Inspect` implementations.
 
 ### Slice 2 — target, credential, deadline, and admission runtime
 
@@ -1481,12 +1467,13 @@ Exit: current PtcRunner Ollama use is migrated without prompt flattening.
 
 ## Risks and stop conditions
 
-### TLS bounded-read feasibility
+### TLS bounded-read feasibility — cleared
 
-This is the primary technical stop condition. Do not build a streaming parser
-on an API that can either block for the requested maximum or deliver an
-unbounded record. The same stop condition covers TLS handshake records and
-certificate-chain allocation before application-data reads.
+The primary technical stop condition did not fire; `docs/transport-backend.md`
+records why, with the measurements. It stays live as a regression rule rather
+than an open risk: do not build a streaming parser on an API that can only
+block for the requested maximum or deliver an unbounded record, and do not
+relax the handshake or chain bounds without new evidence in that document.
 
 ### Scope creep into ReqLLM
 

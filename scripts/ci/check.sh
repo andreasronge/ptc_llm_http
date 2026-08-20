@@ -7,6 +7,8 @@
 # release work, not correctness coverage -- see full_check.sh. Do not buy speed
 # here by lowering property counts or skipping tests.
 
+set -euo pipefail
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 "$script_dir/quality.sh"
