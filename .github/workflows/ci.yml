@@ -52,14 +52,34 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: scripts/ci/tests.sh
 
-  # PROVISIONAL. The declared minimum in mix.exs matches PtcRunner's `~> 1.15`,
-  # but the minimum OTP release is not a guess to be made here: Slice 1's
+  # Verifies the Elixir version the package *declares*, on the package's real
+  # consumer surface: only runtime dependencies are fetched, so no dev or test
+  # tooling can mask an incompatible library. Tests cannot run here -- the lint
+  # and property tooling needs a newer Elixir than the declaration -- which is
+  # what the `compat` job below is for.
+  declared-minimum:
+    name: Declared minimum Elixir compiles
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.15.8'
+          otp-version: '26.2.5'
+      - run: scripts/ci/minimum-elixir.sh
+
+  # PROVISIONAL, and deliberately not the declared minimum.
+  #
+  # This runs the suite on the oldest pair the development tooling supports.
+  # The minimum OTP release is not a guess to be made here: Slice 1's
   # socket/TLS spike establishes it from the `:socket` and `:ssl` behavior the
-  # transport actually requires, and this pair must then be updated to match.
+  # transport actually requires. When it does, this pair and the `elixir:`
+  # declaration in mix.exs must be brought into agreement.
+  #
   # ubuntu-22.04 is deliberate -- precompiled OTP 26 builds are published for
   # it, not for 24.04.
   compat:
-    name: Minimum supported Elixir/OTP
+    name: Oldest supported toolchain
     runs-on: ubuntu-22.04
     env:
       MIX_ENV: test
@@ -67,7 +87,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-elixir
         with:
-          elixir-version: '1.15.8'
+          elixir-version: '1.18.4'
           otp-version: '26.2.5'
       - run: scripts/ci/tests.sh --include compat
 
@@ -108,3 +128,4 @@ jobs:
       - run: scripts/ci/release.sh
       - run: scripts/ci/package.sh
       - run: scripts/ci/deps.sh
+      - run: scripts/ci/minimum-elixir.sh

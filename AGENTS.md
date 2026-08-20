@@ -100,8 +100,11 @@ small by moving *platform* work out, not by dropping coverage.
   errors, compile-cycle check, Credo, and the test suite. Target: comfortably
   under a minute warm. Run before every commit.
 - `mix full_check` — everything in `mix check`, plus the `:compat`/`:release`
-  tests, dependency audit, Dialyzer, docs with warnings as errors, the minimal
-  release smoke, and package-contents verification. Run before a release.
+  tests, dependency audit, the runtime-dependency check
+  (`scripts/ci/minimum-elixir.sh`: the library must compile with only its
+  runtime dependencies fetched), Dialyzer, docs with warnings as errors, the
+  minimal release smoke, and package-contents verification. Run before a
+  release.
 - `scripts/ci/tests.sh [args]` — the canonical test gate. It sets `CI=1`, so
   property tests run the same case count locally and in CI. Extra arguments go
   to `mix test`, which is how a specific seed or case is reproduced through the

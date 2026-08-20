@@ -9,6 +9,13 @@ defmodule PtcLlmHttp.MixProject do
     [
       app: @app,
       version: @version,
+      # The consumer surface, not the development surface: this library's only
+      # runtime dependency is Jason, and `scripts/ci/minimum-elixir.sh` compiles
+      # it under this version with nothing else fetched. The lint and property
+      # tooling needs a newer Elixir, so the suite itself runs one tier above
+      # (see the `compat` job). The minimum OTP release is not declared yet --
+      # Slice 1's socket/TLS spike establishes it from required `:socket` and
+      # `:ssl` behavior instead of guessing.
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),

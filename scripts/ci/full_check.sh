@@ -12,6 +12,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$script_dir/quality.sh"
 "$script_dir/tests.sh" --include compat --include release
 "$script_dir/deps.sh"
+"$script_dir/minimum-elixir.sh"
 "$script_dir/dialyzer.sh"
 "$script_dir/docs.sh"
 "$script_dir/release.sh"
