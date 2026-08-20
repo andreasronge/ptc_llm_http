@@ -2,10 +2,10 @@
 
 Bounded BEAM-native HTTP transport and wire codecs for LLM requests.
 
-> **Status: pre-alpha.** This repository currently contains project
-> infrastructure and the reserved public namespace only. No network call is
-> possible yet. The transport, runtime, and codecs land slice by slice under
-> the approved implementation plan in `docs/plans/`.
+> **Status: pre-alpha.** The bounded socket and TLS backends are in place and
+> proven against local fixtures; there is no public API yet, and no HTTP
+> request can be made. The runtime, HTTP core, and codecs land slice by slice
+> under the approved implementation plan in `docs/plans/`.
 
 ## What this is
 
@@ -44,9 +44,11 @@ decides to try again.
 
 ## Requirements
 
-Elixir `~> 1.15`. The minimum OTP release is established by the socket/TLS
-spike (Slice 1) rather than guessed; development uses the toolchain pinned in
-`mise.toml`.
+Elixir `~> 1.15` and Erlang/OTP 26 or later. The OTP floor is what the bounded
+socket and TLS behavior needs, not a preference — see
+[docs/transport-backend.md](https://github.com/andreasronge/ptc_llm_http/blob/main/docs/transport-backend.md)
+— and CI runs the transport suite on it. Development uses the toolchain pinned
+in `mise.toml`.
 
 ## Development
 

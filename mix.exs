@@ -5,6 +5,20 @@ defmodule PtcLlmHttp.MixProject do
   @version "0.0.1"
   @source_url "https://github.com/andreasronge/ptc_llm_http"
 
+  # Fixed by the socket/TLS spike, not guessed: OTP 26 is the oldest release
+  # carrying every primitive the transport needs -- in-memory platform trust
+  # through `:public_key.cacerts_get/0`, the TLS 1.3 client, and the bounded
+  # handshake options -- and the oldest pair CI runs the suite on. The
+  # reasoning and the measurements are in docs/transport-backend.md. Mix has no
+  # OTP requirement key, so the check is here.
+  @minimum_otp 26
+
+  if String.to_integer(System.otp_release()) < @minimum_otp do
+    Mix.raise(
+      "ptc_llm_http requires Erlang/OTP #{@minimum_otp} or later, found #{System.otp_release()}"
+    )
+  end
+
   def project do
     [
       app: @app,
@@ -13,9 +27,7 @@ defmodule PtcLlmHttp.MixProject do
       # runtime dependency is Jason, and `scripts/ci/minimum-elixir.sh` compiles
       # it under this version with nothing else fetched. The lint and property
       # tooling needs a newer Elixir, so the suite itself runs one tier above
-      # (see the `compat` job). The minimum OTP release is not declared yet --
-      # Slice 1's socket/TLS spike establishes it from required `:socket` and
-      # `:ssl` behavior instead of guessing.
+      # (see the `compat` job). The OTP floor is `@minimum_otp` above.
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -102,6 +114,10 @@ defmodule PtcLlmHttp.MixProject do
     [
       {:jason, "~> 1.4"},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
+      # Test-only certificate authoring. The TLS conformance suite builds its
+      # own CA, leaves, and adversarial chains in memory at run time, so no
+      # private key or expiring certificate is committed to this repository.
+      {:x509, "~> 0.9", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -144,14 +160,20 @@ defmodule PtcLlmHttp.MixProject do
     [
       main: "readme",
       source_ref: "v#{@version}",
-      extras: ["README.md", "CHANGELOG.md", "docs/protocol-evidence.md", "LICENSE"]
+      extras: [
+        "README.md",
+        "CHANGELOG.md",
+        "docs/transport-backend.md",
+        "docs/protocol-evidence.md",
+        "LICENSE"
+      ]
     ]
   end
 
   defp package do
     [
-      files:
-        ~w(lib docs/protocol-evidence.md .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib docs/transport-backend.md docs/protocol-evidence.md .formatter.exs mix.exs
+           README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,

@@ -23,9 +23,13 @@ entry here, and without an exact local fixture, is unsupported.
 
 ## Entries
 
-None yet — this file is seeded with the bootstrap commit. The first entries
-arrive with the HTTP/1 core (Slice 3) and the OpenAI-compatible codec
-(Slice 4).
+HTTP framing and provider-codec entries arrive with the HTTP/1 core and the
+OpenAI-compatible codec. The transport entries below came first, because the
+socket layer had to know what a TLS record can hold before anything could be
+read into a bounded buffer.
 
 | Area | Decision | Source | Version / revision | Accessed | Fixture |
 | --- | --- | --- | --- | --- | --- |
+| TLS records | One read returns at most 16 KiB of application plaintext, which is the arrival cap both socket backends pin `buffer` to. TLS 1.3's `2^14+1` limit counts the inner content-type byte, so the payload bound is unchanged. | RFC 8446 section 5.1; the limit as restated in RFC 8449 section 4, <https://www.rfc-editor.org/rfc/rfc8449.html> ("For TLS 1.2 and earlier, that limit is 2^14 octets. TLS 1.3 uses a limit of 2^14+1 octets.") | TLS 1.2 and TLS 1.3 | 2026-08-20 | `test/ptc_llm_http/transport/tls_test.exs`, "one arrival is one TLS record at most" |
+| TLS ALPN | The client offers `http/1.1` only; a peer sharing no protocol with it fails the handshake instead of negotiating something else | RFC 7301 section 3.2, <https://www.rfc-editor.org/rfc/rfc7301#section-3.2> ("the server SHALL respond with a fatal `no_application_protocol` alert") | RFC 7301 | 2026-08-20 | `test/ptc_llm_http/transport/tls_test.exs`, "verifies the chain and negotiates HTTP/1.1" |
+| TLS identity | Certificate verification uses the DNS name the caller started from, while the socket goes to one approved address. A CN-only certificate is not accepted. | RFC 9110 section 4.3.4, <https://www.rfc-editor.org/rfc/rfc9110#section-4.3.4> ("A reference identity of type CN-ID MUST NOT be used by clients"), which defers the matching rules to RFC 6125 section 6 | RFC 9110, RFC 6125 | 2026-08-20 | `test/ptc_llm_http/transport/tls_test.exs`, "verifies the certificate against the hostname while connecting to a pinned address" |

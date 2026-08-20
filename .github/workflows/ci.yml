@@ -68,18 +68,20 @@ jobs:
           otp-version: '26.2.5'
       - run: scripts/ci/minimum-elixir.sh
 
-  # PROVISIONAL, and deliberately not the declared minimum.
+  # The declared OTP floor, running the whole suite.
   #
-  # This runs the suite on the oldest pair the development tooling supports.
-  # The minimum OTP release is not a guess to be made here: Slice 1's
-  # socket/TLS spike establishes it from the `:socket` and `:ssl` behavior the
-  # transport actually requires. When it does, this pair and the `elixir:`
-  # declaration in mix.exs must be brought into agreement.
+  # `mix.exs` requires OTP 26 or later, established by the socket/TLS spike and
+  # explained in docs/transport-backend.md. This job is where that claim is
+  # tested rather than asserted: the transport conformance suite runs here, so
+  # a socket or TLS behavior that differs on the oldest supported release fails
+  # the build. The Elixir version is the oldest the lint and property tooling
+  # supports, which is above the declared `elixir: "~> 1.15"`; the
+  # `declared-minimum` job covers that end.
   #
   # ubuntu-22.04 is deliberate -- precompiled OTP 26 builds are published for
   # it, not for 24.04.
   compat:
-    name: Oldest supported toolchain
+    name: Minimum supported OTP
     runs-on: ubuntu-22.04
     env:
       MIX_ENV: test
