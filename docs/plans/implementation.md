@@ -1,8 +1,10 @@
 # PtcLlmHttp implementation plan
 
-**Status:** approved project bootstrap plan. Written 2026-08-20 for the empty
-`ptc_llm_http` project. The first implementation slice must update this audit
-header with the initial commit and the selected OTP compatibility range.
+**Status:** active implementation plan; cross-project review incorporated
+2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
+`bae77e0` with follow-up CI/tooling commits through `cebdd8f`; no network call is
+possible yet. Slice 1 is next. It must replace this audit note with the selected
+minimum OTP release and the bounded TLS-backend decision before Slice 2 begins.
 
 ## Goal
 
@@ -26,16 +28,22 @@ smaller surface:
 - physical outbound-connection admission; and
 - typed, bounded transport and wire errors.
 
-It does not own model selection, provider failover, credentials storage,
-application policy, provider-task heaps, cumulative call budgets, traces,
-pricing, model catalogs, or provider-native APIs.
+It does not own model selection, client-initiated provider failover,
+credentials storage, application policy, provider-task heaps, cumulative call
+budgets, traces, pricing, model catalogs, or provider-native APIs.
+
+“Provider-task heaps” above means PtcRunner's logical callback-worker policy.
+The package still owns non-disableable process-heap ceilings for every process
+it starts; otherwise transport and decode work would escape the caller's bound.
 
 ## Success criteria
 
 The project is successful when:
 
 1. its public API has no dependency on PtcRunner or ReqLLM;
-2. every external byte crossing the socket is bounded before accumulation;
+2. every external byte crossing the socket is bounded before accumulation,
+   including a verified TLS-handshake/certificate-chain bound or an explicit
+   stop at the transport spike;
 3. every request performs at most one DNS/connect/send attempt and uses at
    most one HTTP/1 connection;
 4. deadlines and cancellation close the socket and release capacity on every
@@ -63,14 +71,14 @@ The repository boundary is:
 | PtcLlmHttp owns | PtcRunner owns |
 | --- | --- |
 | Validated HTTP target and wire capabilities | Host document and installation schema |
-| Physical global/group connection admission | VM/group/alias logical provider admission |
+| Physical runtime/group attempt admission using consumer-supplied ceilings | The immutable VM/group capacity configuration and alias logical admission |
 | Absolute transport deadline | Run and provider deadline selection |
 | DNS, TCP, TLS, HTTP/1 framing | Credential resolution and data policy |
 | OpenAI-compatible and Ollama codecs | Alias routing and default selection |
 | Bounded response/provider error facts | Mapping into `ProviderError` and diagnostics |
-| Synchronous streaming with backpressure | Adapter `Enumerable` bridge and Kernel events |
+| Synchronous callback streaming with backpressure and early halt | Direct callback consumption and Kernel events |
 | Provider-reported usage fields | Usage budgets, accounting, and traces |
-| No retry and no failover | Explicit workflow/operator failover policy |
+| No client-initiated retry or failover; declared upstream-routing wire controls | Explicit workflow/operator failover policy and gateway data-policy acceptance |
 
 No package module imports or returns a `PtcRunner.*` type. The PtcRunner
 adapter is intentionally thin and remains in PtcRunner.
@@ -79,9 +87,11 @@ adapter is intentionally thin and remains in PtcRunner.
 
 - Application and package name: `:ptc_llm_http`; top-level namespace:
   `PtcLlmHttp`.
-- License: MIT, matching PtcRunner, unless changed before the first commit.
-- Versioning: 0.x with breaking changes allowed. PtcRunner pins an exact tag or
-  Git commit; it never follows a moving branch.
+- License: MIT, matching PtcRunner, as landed in the bootstrap.
+- Versioning: 0.x with breaking changes allowed. PtcRunner may pin an exact tag
+  or Git commit during pre-release integration and never follows a moving
+  branch. Its published production package requires a published Hex version of
+  `ptc_llm_http`.
 - Elixir declaration should initially match PtcRunner's `~> 1.15`. The minimum
   OTP release is not guessed: the transport spike establishes it from the
   required `:socket` and `:ssl` behavior, and CI tests that declared minimum
@@ -100,9 +110,12 @@ adapter is intentionally thin and remains in PtcRunner.
   a socket-owning lazy enumerable.
 - Tool calls and structured output use non-streaming calls in V1. Streaming is
   text-only until a separate tool-delta contract is specified and tested.
-- Provider failover is never automatic here. A new attempt against another
-  model or provider is a new PtcRunner logical call with its own authority,
-  capacity, call-budget, usage, and trace record.
+- Client-initiated provider failover is never automatic here. A new package
+  call against another target is a new PtcRunner logical call with its own
+  authority, capacity, call-budget, usage, and trace record. A gateway may
+  route among upstream providers inside the one request; the target declares
+  that behavior as opaque unless a codec-backed single-provider control is
+  encoded and fixture-tested.
 - Bedrock SigV4, Anthropic Messages, Google-native APIs, and other
   provider-native transports are separate adapters or packages.
 
@@ -160,11 +173,20 @@ lib/
   ptc_llm_http.ex
   ptc_llm_http/application.ex
   ptc_llm_http/runtime.ex
+  ptc_llm_http/runtime/root.ex
+  ptc_llm_http/runtime/guardian.ex
+  ptc_llm_http/runtime/generation.ex
   ptc_llm_http/runtime/admission.ex
+  ptc_llm_http/runtime/attempt_tree.ex
+  ptc_llm_http/runtime/attempt_relay.ex
   ptc_llm_http/target.ex
   ptc_llm_http/credential.ex
+  ptc_llm_http/process_budget.ex
+  ptc_llm_http/resource_contract.ex
   ptc_llm_http/request.ex
   ptc_llm_http/response.ex
+  ptc_llm_http/stream_complete.ex
+  ptc_llm_http/stream_halt.ex
   ptc_llm_http/error.ex
   ptc_llm_http/usage.ex
   ptc_llm_http/tool.ex
@@ -206,33 +228,103 @@ trusted callbacks may raise after cleanup.
 ```elixir
 {:ok, runtime} =
   PtcLlmHttp.Runtime.start_link(
-    max_connections: 8,
+    max_concurrency: 8,
     groups: %{"openrouter-account" => 4}
   )
 ```
 
-The runtime owns only physical HTTP-attempt admission and backend supervision.
-It does not own credentials, model aliases, logical provider tasks, or retry
-policy.
+The package exposes one data-only `PtcLlmHttp.ResourceContract.current/0`
+projection containing the resource-contract version, inclusive process-budget
+minimum/maximum, process-partition version, and runtime-control formula version.
+It exposes no role names, percentages, process IDs, or mutable counters. A pinned
+consumer uses this projection at build/integration validation instead of copying
+the numeric range as an independent source of truth; the detailed internal
+catalog remains package-owned.
+
+The public runtime handle names a `:rest_for_one` `RuntimeRoot` with this exact
+child order: a permanent `RuntimeGuardian`, then a permanent
+`GenerationSupervisor`. The guardian owns the opaque current generation,
+registered attempt/role monitors, terminal-cause facts, and the bounded teardown
+protocol. `GenerationSupervisor` has at most one temporary outer-generation
+child. That child is a fail-stop `:one_for_all` boundary containing one
+generation admission owner and one attempt supervisor, both `restart:
+:transient`, with restart intensity zero. The boundary owns only physical
+HTTP-attempt admission and backend supervision. It does not own credentials,
+model aliases, logical provider tasks, or retry policy.
 
 Required behavior:
 
-- `max_connections` is a VM/runtime-wide ceiling;
+- `max_concurrency` is a runtime-wide ceiling in `1..1_024` and the runtime has
+  at most 256 configured groups;
 - every target names one configured group and its group ceiling narrows the
   global ceiling;
 - global and group reservations are atomic;
 - admission is non-blocking and occurs immediately before DNS/connect;
-- the owner monitors the call process and releases a lease if it dies;
+- every admitted attempt is one fail-stop supervised ownership subtree below
+  the attempt supervisor;
+- before any target/request/credential is delivered, every attempt tree and its
+  fixed role PIDs are atomically registered with the surviving guardian;
+- the guardian monitors the registered tree/roles and authorizes the admission
+  owner to release a lease only after that whole subtree is `DOWN`;
 - normal cleanup is idempotent and exactly once;
 - runtime-owner death poisons or stops the runtime rather than silently
   resetting capacity under surviving calls; and
 - readiness and bounded counter snapshots are available without exposing
   target, endpoint, model, or credential data.
 
+Shared runtime control memory is bounded separately from each attempt envelope.
+The internal catalog grants one aggregate control heap of
+`160_000 + 2_560 * max_concurrency + 512 * group_count` words. Its versioned
+partition covers every long-lived package control process: 10% runtime root,
+25% guardian, 10% generation supervisor, 10% outer-generation supervisor, 30%
+admission state, and 15% attempt-supervisor state. At most one process occupies
+each role, so the shares sum rather than multiply; integer remainder goes to the
+guardian. Each process sets its derived heap flag at startup.
+The guardian and admission slots retain only counters, monitor refs, closed
+phase/cause atoms, delivery acknowledgements, and opaque bootstrap IDs;
+target/request/credential/result values never enter shared control state.
+Exceeding any control-process heap bound poisons the runtime generation rather
+than resetting counters. This bounded runtime overhead is reported independently
+from per-call process budgets and included in PtcRunner's host memory
+calculation.
+
+The package intentionally permits independent runtimes for independent
+consumers; it does not claim to discover or enforce a VM singleton. PtcRunner
+constructs exactly one runtime generation from its immutable host
+`llm_capacity` configuration and passes the same global/group values to its
+logical owner. PtcRunner exposes no separately configurable physical ceiling.
+Starting a second package runtime creates an independent capacity domain and is
+not a way to join or extend the first.
+
+Generation failure is fail-stop, but teardown authority does not die with its
+admission owner. Before an attempt may receive private payload or connect, its
+tree and every fixed role complete a guardian registration handshake. On
+admission-owner, attempt-supervisor, or outer-generation failure, the surviving
+guardian immediately fences that generation, records `runtime_shutdown`, and
+starts one generation-wide cleanup cutoff. It signals every registered tree
+concurrently, brutally kills survivors at 900 milliseconds, and spends the
+remaining 100 milliseconds consuming their `DOWN` messages. It never releases
+the dead generation's counters in place. Only after all registered old-generation
+trees/roles and the outer generation are `DOWN` may it explicitly start and
+publish a replacement with a new identity; otherwise the runtime remains
+poisoned and returns `runtime_unavailable`.
+
+If the guardian itself dies, `RuntimeRoot`'s `:rest_for_one` ordering terminates
+the later `GenerationSupervisor` before either child restarts. The generation
+child specification has the same single 1,000-millisecond aggregate shutdown
+cutoff and brutal-kill fallback, and no package process may detach from that
+supervision tree. `RuntimeRoot` observes the old generation supervisor `DOWN`
+before starting the replacement guardian, so loss of the old monitor registry
+cannot publish capacity over surviving descendants. A stale owner or generation
+identity cannot admit or release against the replacement. Tests cover guardian,
+admission-owner, attempt-supervisor, and outer-generation death before and after
+DNS, connect, partial send, blocked callback, result handoff, and partial
+receive.
+
 For V1, one admitted attempt equals at most one live outbound connection. If a
 future version retains idle sockets or multiplexes HTTP/2 streams, it must add
 separately named connection, stream, and request limits instead of changing the
-meaning of `max_connections`.
+meaning of `max_concurrency`.
 
 ### Target
 
@@ -243,12 +335,14 @@ meaning of `max_connections`.
     base_url: "https://openrouter.ai/api/v1",
     model: "deepseek/deepseek-v4-flash",
     capacity_group: "openrouter-account",
-    max_request_bytes: 1_000_000,
-    max_response_bytes: 1_000_000,
+    connect_policy: :public,
+    max_encoded_request_bytes: 1_000_000,
+    max_wire_response_bytes: 1_000_000,
     tools: true,
     streaming: true,
     structured_output: :json_schema,
     cache_mode: :unsupported,
+    upstream_routing: :opaque,
     usage_guarantees: %{tokens: true, cost: false}
   )
 ```
@@ -270,14 +364,44 @@ Target invariants:
 - decoded `.` and `..` segments rejected rather than normalized;
 - empty path segments retained and fixed operation segments appended by the
   codec;
+- an HTTPS target uses a DNS hostname; V1 rejects HTTPS IP literals rather than
+  implement a separate no-SNI/IP-address-SAN verification path;
 - bounded model and capacity-group identifiers;
-- exact capability modes and usage guarantees;
-- positive request/response byte ceilings within package maxima; and
+- one closed connect-address policy compiled into the target;
+- exact capability modes, upstream-routing guarantee, and usage guarantees;
+- one closed codec/error-contract version used for provider-code recognition;
+- positive encoded-request and wire-response byte ceilings within package
+  maxima; and
 - fully redacted `Inspect`, no `Enumerable`, and no JSON encoder.
 
 The target contains no resolved credential bytes. It may retain private
 endpoint/model configuration internally, but no error or metadata projection
 returns them.
+
+#### Connect-address authority
+
+V1 connect policy is either `:public`, `:literal_loopback`, or
+`{:allow_cidrs, cidrs}`. `:public` admits only globally routable unicast IPv4 or
+IPv6 addresses. It rejects unspecified, loopback, RFC1918/ULA, carrier-grade
+NAT, link-local, multicast, documentation/benchmark/reserved ranges,
+IPv4-mapped bypass forms, and platform metadata-service ranges. The exact IANA
+special-purpose tables and update date are retained protocol evidence, not
+implicit library behavior. `:literal_loopback` is valid only for a
+credential-free literal loopback HTTP target. `allow_cidrs` is an explicit
+bounded list of canonical CIDRs and is the only way to authorize an internal
+HTTPS service; there is no `:any` policy.
+
+The target constructor validates literal hosts against the policy. For a DNS
+host, the cancellable resolver returns at most the catalog limit and every
+returned address must satisfy the compiled policy; a mixed allowed/disallowed
+answer is rejected rather than filtered. The attempt deterministically selects
+one approved address, pins that exact address for its single connect, and does
+not resolve again. For HTTPS, HTTP `Host`, TLS SNI, and certificate hostname
+verification continue to use the original validated DNS hostname. The only V1
+literal-host path is credential-free loopback HTTP. Tests cover DNS rebinding,
+mixed answers, IPv4-mapped IPv6, metadata/link-local destinations, HTTPS IP-
+literal rejection, policy CIDR edges, and a resolver answer changed after
+selection.
 
 ### Credential
 
@@ -287,9 +411,17 @@ returns them.
 
 V1 supports `:none` and bearer authorization. The value is opaque, has redacted
 `Inspect`, validates the final header-value grammar before any connection, and
-is not stored in the runtime or target. It exists only for the duration of one
-call. The BEAM cannot guarantee memory zeroization; the contract minimizes
-copies and lifetime instead of claiming it.
+is at most the bearer-byte maximum in the limit catalog. It is not stored in the
+runtime or target and exists only for the duration of one call. The BEAM cannot
+guarantee memory zeroization; the contract minimizes copies and lifetime
+instead of claiming it.
+
+PtcRunner's longer-lived installation/capability closure must therefore hold an
+opaque credential-vault lease rather than secret bytes. Its run-owned vault may
+retain the one phase-8 resolution for the run, but each invocation retrieves a
+bounded value through the lease, constructs this package credential, and drops
+the call-local value after cleanup. That consumer refactor is a prerequisite to
+integration; the package never accepts the vault or performs credential lookup.
 
 Arbitrary authorization headers are not accepted. Non-secret static target
 headers may be added only if a real endpoint requires them; their constructor
@@ -315,19 +447,33 @@ needs. Request `Inspect` is redacted because prompts and tool arguments may be
 private. JSON encoding occurs before admission where possible and is rejected
 if the encoded request exceeds the target cap.
 
+The package can represent a request without `max_tokens`, because it does not
+own product policy. The PtcRunner integration must never do so: it supplies an
+installed positive ceiling or its retained 4,096-token default before calling
+this constructor. Exact request fixtures prove the explicit field reaches every
+supported codec. A wire-response byte cap is not treated as a generation or
+cost limit.
+
 ### Call and streaming
 
 ```elixir
-{:ok, response} =
-  PtcLlmHttp.call(runtime, target, request,
-    credential: credential,
-    deadline: absolute_monotonic_deadline
+{:ok, process_budget} =
+  PtcLlmHttp.ProcessBudget.new(
+    total_heap_words: 4_000_000
   )
 
 {:ok, response} =
+  PtcLlmHttp.call(runtime, target, request,
+    credential: credential,
+    deadline: absolute_monotonic_deadline,
+    process_budget: process_budget
+  )
+
+{:ok, completion} =
   PtcLlmHttp.stream(runtime, target, request, on_chunk,
     credential: credential,
-    deadline: absolute_monotonic_deadline
+    deadline: absolute_monotonic_deadline,
+    process_budget: process_budget
   )
 ```
 
@@ -335,21 +481,66 @@ There is no call without a runtime and no relative timeout in the low-level
 API. The consumer computes one absolute monotonic deadline. Every phase reads
 the remaining time from it; no phase resets the budget.
 
+`process_budget` is required. Its closed public constructor accepts only one
+aggregate `total_heap_words` value in the versioned inclusive package range
+`100_000..2_073_600_000`. Both endpoints are durable package contract data, not
+consumer assumptions. The package—not its consumers—versions and derives every
+internal role ceiling. Callers cannot name package roles, control their ratios,
+or disable the bound. A future range or partition change requires a new resource-
+contract version and an explicit consumer integration checkpoint.
+
 `PtcLlmHttp.Deadline` is an opaque millisecond-based value constructed from an
 absolute `System.monotonic_time(:millisecond)` deadline. Public APIs do not mix
 native units, wall-clock timestamps, and durations. Numeric phase durations in
 metadata are integer milliseconds.
 
-`stream/5` calls `on_chunk` synchronously. Slow callback execution therefore
-applies backpressure to socket reads and still consumes the same total
-deadline. Callback raise/throw/exit closes transport state and releases the
-lease before propagating the callback failure. A PtcRunner adapter may bridge
-this API into its current Enumerable contract, but that bridge stays outside
-this package.
+`stream/5` delivers one chunk at a time through a monitored callback worker and
+does not read the next socket bytes until that worker answers, so delivery is
+synchronous and backpressured without blocking the attempt's deadline owner.
+The callback returns `:cont` or `:halt`; any other return is callback misuse. A
+slow or stuck callback still consumes the same total deadline: the attempt
+coordinator remains able to stop the attempt tree when the deadline expires.
+That tree kills the callback worker, closes the socket helper, and reaches
+`DOWN` before admission is released or callback raise/throw/exit is reported to
+the caller.
 
-### Response, stream chunks, and usage
+Neither repository builds an `Enumerable` bridge or producer mailbox.
 
-A successful non-stream response contains only normalized data:
+The closed public return unions are distinct:
+
+```elixir
+PtcLlmHttp.call(...) ::
+  {:ok, %PtcLlmHttp.Response{}} | {:error, %PtcLlmHttp.Error{}}
+
+PtcLlmHttp.stream(...) ::
+  {:ok, %PtcLlmHttp.StreamComplete{}}
+  | {:halted, %PtcLlmHttp.StreamHalt{reason: :consumer_halted}}
+  | {:error, %PtcLlmHttp.Error{}}
+```
+
+Once an attempt tree exists, every value-bearing member of these unions—not
+only `%Response{}`—uses the caller-retained terminal handoff defined in the
+resource section. That includes `%StreamComplete{}`, `%StreamHalt{}`, and every
+classified `%Error{}` with its exact bounded status/code/scope/dispatch facts.
+Validation, target, credential, deadline, runtime, or capacity errors returned
+before an attempt is registered have no tree to drain and return directly.
+
+`StreamHalt` contains only delivered decoded-byte/chunk counts, bounded
+transport metadata, and usage already observed before the halt; it never
+reconstructs partial content. `usage_complete?` is always `false`, and absent
+terminal usage stays absent. Because the consumer deliberately prevented the
+terminal event, `usage_guarantees` are not evaluated as a provider-protocol
+failure for this outcome. The attempt is nevertheless dispatched and the
+consumer's logical call remains charged. PtcRunner's adapter immediately maps
+the package struct into its own provider-neutral tagged halt value. Its
+run-backed `RunState` or bound direct-accounting owner charges any reported
+usage and records a host accounting failure (not a `ProviderError`) when an
+installed token/cost ceiling required authoritative terminal usage; an ambient
+direct call without one of those owners is not retained.
+
+### Response, stream completion/chunks, and usage
+
+A successful non-stream `%Response{}` contains only normalized data:
 
 - content string, which may be empty;
 - zero or more normalized tool calls `%{id:, name:, args:}`;
@@ -367,46 +558,70 @@ response reports it and the codec has an exact documented field mapping.
 Missing optional usage remains absent rather than becoming zero. Missing usage
 promised by `usage_guarantees` is an invalid-provider-response error.
 
-Text stream chunks are `%{delta: binary()}` and the final return carries the
-complete normalized usage. The package need not retain the full generated text
-when the consumer callback owns accumulation. Cumulative wire and decoded-text
-caps still apply.
+Text stream chunks are `%{delta: binary()}`. `%StreamComplete{}` carries only
+complete normalized usage, delivered decoded-byte/chunk counts, and bounded
+transport metadata; it has no `content` field. The package never accumulates the
+full generated text. A consumer that needs full content owns a separately
+bounded accumulator, while cumulative package wire and decoded-text caps still
+apply before every callback.
 
 ### Error
 
 All expected target, capacity, transport, HTTP, protocol, and provider-response
-failures return `%PtcLlmHttp.Error{}`. The closed initial taxonomy distinguishes:
+failures return `%PtcLlmHttp.Error{}`. The closed initial `kind` enum is:
 
-- invalid target/request/credential;
-- unsupported declared capability;
-- capacity exhausted or runtime unavailable;
-- deadline exceeded, with phase;
-- DNS failure or address-set rejection;
-- connection refused or other connect failure;
-- TLS verification/handshake failure;
-- connection closed during send/receive;
-- malformed or oversized HTTP response;
-- unsupported redirect, content encoding, transfer encoding, or framing;
-- HTTP status response;
-- malformed provider JSON or result shape; and
-- malformed/oversized SSE or tool-call arguments.
+```elixir
+:invalid_target | :invalid_request | :invalid_credential |
+:unsupported_capability | :capacity_exhausted | :runtime_unavailable |
+:deadline_exceeded | :resource_limit_exceeded | :callback_failed |
+:internal_failure | :dns_failure |
+:address_rejected | :connect_failure |
+:tls_failure | :connection_closed | :malformed_http | :response_too_large |
+:unsupported_redirect | :unsupported_content_encoding |
+:unsupported_transfer_encoding | :unsupported_framing | :http_status |
+:malformed_provider_response | :provider_result_too_large |
+:malformed_stream | :stream_too_large | :invalid_tool_arguments
+```
+
+The closed `phase` enum is `:validate | :encode | :admission | :dns |
+:connect | :tls | :send | :receive_head | :receive_body | :stream |
+:decode`. Kinds that cannot occur in a phase are rejected by the error
+constructor. `scope` is also closed:
+`:request | :credential | :capacity | :transport | :provider | :model`.
+Provider error codes exposed publicly are atoms from a closed, codec/version-
+specific enum or `nil`; unknown raw codes are discarded and take the default
+status mapping. No arbitrary string or open-ended scope crosses the boundary.
+
+`PtcLlmHttp.Error.contract/0` returns a version plus a bounded sorted list of
+disjoint contract entries. Each entry has a stable ID and enumerates its exact
+kind, allowed phases, HTTP status list/ranges, provider-code atoms, scopes, and
+dispatch states. It also returns the full kind/phase/scope/code enums. Every
+constructible error matches exactly one entry. Adding or changing any enum,
+status partition, provider-specific refinement, or entry is a versioned cross-
+repository contract change and must update PtcRunner's generated exhaustive
+mapping test in the same integration checkpoint.
 
 The error carries stable facts, not a retry/failover decision: kind, phase,
-optional HTTP status, optional bounded provider error code, and a conservative
-scope such as transport, provider, model, or request only when the wire proves
-it. PtcRunner decides retryability and failover.
+optional HTTP status, optional closed provider error code, one required closed
+scope, and dispatch state
+`:not_sent | :possibly_sent | :completed`. `:not_sent` is used only when the
+wire proves request bytes could not reach the peer; ambiguity after send begins
+is `:possibly_sent`. PtcRunner decides retryability, `ProviderError` provenance,
+quota policy, and failover from this closed evidence.
 
-`Inspect` is redacted. Public safe details are fixed package vocabulary.
-Provider error text, if retained for private operator evidence, is separately
-bounded, invalid-UTF-8 rejecting, inaccessible through ordinary `Inspect`, and
-never includes raw headers, request/response bodies, endpoint, model, or
-credential. If that separation cannot be made mechanically reliable, discard
-provider text and return only status/code.
+`Inspect` is redacted. Public safe details are fixed package vocabulary. V1
+discards provider error text before constructing the result and returns only
+status, a bounded documented provider code, scope, phase, and dispatch state.
+There is no private-evidence capsule or alternate error tuple, so the closed
+return union above is complete. PtcRunner private inspection may record those
+same safe facts with its own trace correlation, but it never receives raw
+provider text, headers, request/response bodies, endpoint, model, or credential.
 
 ## Initial limit catalog
 
-Slice 0 centralizes every cap in one internal catalog and exposes the target-
-narrowable subset through constructors. These are the starting V1 values; a
+Slice 2 creates one internal catalog before any constructor is usable; later
+slices add parser/codec caps to that same owner. The target-narrowable subset is
+exposed through constructors. These are the starting V1 values; a
 different value must be justified and changed before dependent fixtures are
 approved.
 
@@ -415,8 +630,15 @@ approved.
 | Base URL / origin-form target | 8,192 bytes |
 | Model identifier | 256 bytes |
 | Capacity-group identifier | 128 bytes |
-| Encoded request body | 1,048,576 bytes |
-| Identity response payload | 1,048,576 bytes |
+| Runtime concurrency / configured groups | 1,024 / 256 |
+| Shared runtime-control heap | `160,000 + 2,560 × concurrency + 512 × groups` BEAM heap words |
+| Internal runtime-control partition | root 10%, guardian 25%, generation supervisor 10%, outer generation 10%, admission 30%, attempt supervisor 15% |
+| Bearer credential bytes | 16,376 bytes |
+| Encoded request body (`max_encoded_request_bytes`) | 1,048,576 bytes |
+| Request header name / value | 128 / 16,384 bytes |
+| Total request header fields | 64 |
+| Aggregate encoded request head | 65,536 bytes |
+| Identity wire response payload (`max_wire_response_bytes`) | 1,048,576 bytes |
 | Status/header line | 16,384 bytes |
 | Aggregate response head | 65,536 bytes |
 | Response header fields | 128 |
@@ -429,24 +651,149 @@ approved.
 | Tool name / tool-call ID | 128 / 256 bytes |
 | JSON nesting / visited containers and scalar values | 64 / 100,000 |
 | DNS addresses retained from one resolution | 8 |
+| Explicit connect-policy CIDRs | 32 |
 | Non-secret static target headers | 32 |
+| Aggregate package process budget per attempt | 100,000–2,073,600,000 BEAM heap words |
+| Internal process-partition version | `process-v1` |
+| Attempt-tree supervisor role | 5% of aggregate heap words |
+| Coordinator role | 5% of aggregate heap words |
+| Sequential encode/decode role | 40% of aggregate heap words |
+| Callback role | 15% of aggregate heap words |
+| DNS role | 5% of aggregate heap words |
+| Socket/TLS role | 20% of aggregate heap words |
+| Result/cause relay role | 10% of aggregate heap words |
+| Aggregate attempt cleanup cutoff | 1,000 milliseconds |
 
 Per-target request/response caps may only narrow the hard maximum. Individual
 prompt, content, schema, tool, argument, and error fields also need caps so one
 field cannot consume an aggregate through an implementation accident. JSON is
 validated after decode for depth, node count, expected object shape, and
-bounded strings; the provider worker's heap ceiling remains an independent
-consumer defense.
+bounded strings. These post-decode checks are semantic bounds, not protection
+against allocation during decode.
+
+`process-v1` is package-owned and sums to exactly 100%. Integer rounding assigns
+the remainder to the codec role. At most one process in each role may be live;
+encode and decode reuse the sequential codec role. Every package-owned attempt
+supervisor, coordinator, encode/decode, callback, DNS, socket/TLS, and result/
+cause relay process sets `max_heap_size` with `kill: true` and
+`error_logger: false` before external data or caller code. The partition sum and
+one-live-process-per-role invariant make the total possible per-attempt package
+heap no greater than the caller's aggregate. Independently applying the
+aggregate to several processes is forbidden. Changing roles or percentages is a
+versioned package resource-contract change; PtcRunner depends only on aggregate
+semantics and rejects an unknown partition version at an integration checkpoint.
+
+Each admitted attempt is a temporary fail-stop `AttemptTree` supervisor with a
+coordinator and its role children. The tree is `restart: :temporary` below the
+attempt supervisor; its role children are `restart: :transient` under
+`:one_for_all` with restart intensity zero. Unexpected normal role exit is
+normalized to abnormal. No response, tool argument, content chunk, terminal
+error fact set, or provider payload crosses the guardian or admission owner.
+Every value-bearing terminal outcome after tree registration uses one two-phase
+handoff. The result/cause relay constructs the already bounded `%Response{}`,
+`%StreamComplete{}`, `%StreamHalt{}`, or `%Error{}` candidate and sends it
+directly to the authorized calling process under a one-time delivery reference.
+The caller retains it in its own bounded process and acknowledges only that
+reference. The relay then reports only the opaque reference and closed precedence
+category to the guardian. The caller returns nothing until the guardian has
+stopped the whole attempt tree and observed every registered `DOWN`. For a live
+generation the guardian must then obtain the admission owner's atomic lease-
+release acknowledgement before sending an opaque terminal decision. If that
+owner is dead, `runtime_shutdown` wins, its counters are fenced rather than
+released for reuse, and the guardian may send only the discard/replacement
+decision after teardown.
+
+If the candidate's category wins final arbitration, the guardian commits its
+delivery reference and the caller returns the exact retained value. If a higher-
+precedence cause wins, the guardian sends only `discard` plus the winning closed
+kind/phase/dispatch atoms; the caller discards the candidate and constructs the
+corresponding bounded replacement outcome. Exact HTTP status, provider code,
+scope, usage, counts, and metadata are never reconstructed: a classified
+candidate containing those facts either commits unchanged or is discarded.
+If caller, guardian, admission owner, or generation dies before commit, the
+uncommitted candidate is discarded and its value is not published. Thus the
+relay may die with the tree without losing a committed terminal value, and no
+role independently exits and leaves siblings alive. Supervisor child
+specifications retain only an
+opaque attempt ID, generation, aggregate budget, and one-time bootstrap key;
+the caller sends target/request/credential payload directly to the coordinator
+after startup, so no supervisor or child specification retains those values.
+The socket is owned by the socket/TLS child, so coordinator, caller, or helper
+death cannot leave a live socket outside the tree. The guardian monitors the
+tree and each fixed role for bounded cause/lifecycle facts. The admission owner
+changes counters only on the guardian's opaque release command and never releases
+capacity until every role and the tree supervisor are `DOWN`.
+
+The surviving guardian is the single atomic terminal-outcome and cleanup owner.
+Its bounded ledger contains the opaque attempt/role monitor refs, current closed
+phase, dispatch state, delivery reference/acknowledgement, closed candidate
+category, and a set of closed cause atoms only. It never contains the candidate
+value or any of its exact status/code/scope/usage/metadata facts. External
+initiators record their cause before stopping the tree; a role
+returning a classified error or callback misuse sends the atom and waits for
+guardian acknowledgement; an
+uninitiated `:killed` role `DOWN` means `:resource_limit`; another abnormal
+callback-role death discards its raw reason and means `:callback_misuse`; any
+other unexplained role death means `:internal_failure`. Admission-owner or
+generation death records `runtime_shutdown` before the guardian begins fallback
+teardown. A delivered candidate records its category before planned tree stop;
+monitor `DOWN`s caused by a recorded planned stop do not manufacture an error.
+Once all registered role monitors and the tree are `DOWN`, the guardian freezes
+one outcome using this precedence:
+`runtime_shutdown`, `caller_cancelled`, `deadline_exceeded`, `consumer_halted`,
+`callback_misuse`, `resource_limit`, classified
+transport/HTTP/protocol/provider cause, then
+`internal_failure`, then acknowledged `success`. `consumer_halted` represents a
+delivered `StreamHalt`, a classified package cause represents a delivered
+`%Error{}`, and success represents a delivered `%Response{}` or
+`%StreamComplete{}`. Thus a higher-precedence event racing any candidate handoff
+wins, and simultaneous deadline/heap/caller-death races have one deterministic
+result rather than mailbox-order classification.
+
+The frozen outcome has one closed public projection: an acknowledged candidate
+whose category wins receives the opaque commit that lets the caller return its
+retained terminal value; runtime
+shutdown returns `runtime_unavailable`; a dead/cancelled caller receives no
+reply; deadline
+returns `deadline_exceeded`; consumer halt returns `StreamHalt`; callback misuse
+returns `callback_failed`; heap death returns `resource_limit_exceeded`;
+classified package causes retain their committed contract entry; and an
+unexplained death returns `internal_failure`. No raw exit or callback reason
+crosses the boundary.
+
+Cleanup has one package-hard 1,000-millisecond cutoff anchored when the first
+terminal outcome/cause is recorded; it is separate from and never extends the operation
+deadline. The guardian signals all registered roles concurrently, permits at most
+900 milliseconds of cooperative cleanup, then brutally kills every survivor and
+uses the final fixed 100 milliseconds only to consume their monitor `DOWN`
+messages. It never grants a timeout per child. If any registered role/tree has
+not reported `DOWN` at the total cutoff, the physical runtime is poisoned and
+its generation is terminated; its admission counters are never released for
+reuse in place. Tests force every role over its heap bound before/after send,
+hold every cleanup callback, and race deadline/heap/caller/admission-owner death.
+They prove the selected cause and either complete tree `DOWN`, opaque result
+commit, and capacity release in that order or fail-stop runtime teardown at the
+one cutoff. The TLS spike
+separately remains responsible for native/off-heap handshake and certificate
+allocations that BEAM process heap limits do not bound.
 
 Cap-plus-one reads are allowed only to prove overflow and the extra byte is not
 retained in a result. Limit names and units appear in error facts and module
 documentation; unnamed literals in parser/codec code are forbidden.
 
+These limits measure serialized/wire bytes only. PtcRunner separately enforces
+retained BEAM-term request/result limits before and after the package call; the
+integration must not reuse one field name for both units.
+
 ## Deadline, cancellation, and ownership
 
-One call process owns one transport attempt and one capacity lease. The
-ownership chain is runtime admission owner → monitored call process → DNS
-worker/socket/helper. Required properties:
+One supervised `AttemptTree` owns one transport attempt and one capacity lease.
+The ownership chain is the stable runtime guardian → fail-stop outer generation
+with admission owner plus sibling attempt supervisor → per-attempt fail-stop tree
+→ coordinator plus supervised callback/DNS/socket/codec roles. The coordinator,
+never callback code, owns the authoritative operation-deadline timer; the
+guardian owns terminal cause and aggregate cleanup, while the tree owns reverse
+death propagation. Required properties:
 
 - expiration is checked before encoding, admission, DNS, connect, TLS, send,
   every receive, every callback, and final decode;
@@ -454,14 +801,25 @@ worker/socket/helper. Required properties:
 - DNS runs in a monitored cancellable worker because system resolution may
   block;
 - DNS returns a bounded address count; the call makes one connect attempt to
-  one selected address in V1, not a hidden sequence of retries;
-- caller death closes the socket/helper and admission monitoring restores the
-  slot;
+  one policy-approved pinned address in V1, not a hidden sequence of retries;
+- caller death closes the socket/helper and guardian monitoring authorizes slot
+  release only after full teardown;
 - explicit cancellation uses process ownership, not a mutable global flag;
 - normal completion closes the connection before releasing capacity;
 - early stream halt, callback failure, malformed input, provider failure, and
-  every exception path have deterministic cleanup; and
+  every exception path have deterministic cleanup;
+- a callback that never returns is killed at the absolute deadline while the
+  independently owned socket is closed; and
 - tests use monitors and controlled fixtures, never sleeps.
+
+The attempt coordinator monitors the calling process. Once it receives the opaque
+call-local credential, package cleanup no longer depends on caller code: caller
+`DOWN` stops the attempt tree, closing the socket and dropping every credential/
+authorization-buffer copy with its owning child before physical lease release.
+Credentials are never copied into the runtime/admission owner. Tests kill the
+caller before admission, during encode/TLS/send/receive, and in a blocked
+callback and prove every tree child `DOWN` before capacity release. This is a
+bounded-lifetime/no-retention contract, not a BEAM zeroization claim.
 
 Address selection must be deterministic and documented. If dual-stack
 fallback is desired later, it is multiple attempts and requires an explicit
@@ -496,8 +854,11 @@ The spike matrix includes:
 - a payload split across many TLS records;
 - deadline before first byte and between chunks;
 - peer close before and after partial data;
-- caller death during DNS, TCP connect, TLS handshake, and receive; and
-- repeated reads proving no loss or duplication.
+- caller death during DNS, TCP connect, TLS handshake, and receive;
+- repeated reads proving no loss or duplication;
+- an oversized or deeply chained certificate fixture; and
+- measured/verified allocation behavior for TLS handshake records and the
+  peer certificate chain before application-data reads begin.
 
 If OTP TLS cannot satisfy both prompt partial delivery and the exact maximum,
 stop the pure-Elixir transport slice and choose explicitly between:
@@ -510,12 +871,18 @@ an unbounded helper. A port helper expands the project scope: it requires
 frame-size validation before BEAM allocation, stderr capture, process-group
 cleanup, checksum/release packaging, and Linux/macOS x64/arm64 CI.
 
+If supported OTP SSL configuration cannot bound handshake/certificate input
+within the accepted resource model, the pure-OTP backend fails this gate even
+when application-data `recv_up_to` is bounded. The selected capped helper, if
+any, must enforce the handshake-side bound too.
+
 ## TLS and trust
 
 HTTPS requires:
 
 - certificate-chain and hostname verification;
-- SNI using the original validated hostname;
+- a DNS hostname, with SNI and certificate verification using that original
+  validated name; HTTPS IP literals are rejected in V1;
 - ALPN restricted to `http/1.1`;
 - no insecure verification option;
 - no credential-bearing plaintext fallback;
@@ -616,10 +983,19 @@ request. It owns:
 - declared `max_tokens`, temperature, and seed;
 - `stream` selection;
 - declared structured-output translation; and
-- target-declared cache translation.
+- target-declared cache translation and upstream-routing control.
 
 Unknown arbitrary provider parameters are not accepted in V1. Add a closed
 option only with a provider fixture and a PtcRunner installation need.
+
+### Upstream routing
+
+The package guarantees one client request, not one gateway-internal provider
+attempt. Every gateway target declares `upstream_routing: :opaque` unless its
+codec has a closed, documented, fixture-backed single-provider control. For
+OpenRouter, disabling provider fallbacks may be added as such a target
+capability only after exact request fixtures prove the supported wire shape.
+The package never infers a routing guarantee from the model identifier.
 
 ### OpenAI-compatible response
 
@@ -645,9 +1021,15 @@ failure, and provider error shapes.
 
 Target mode is one of `:json_schema`, `:json_object`, or `:unsupported`.
 Requests fail before connection when the requested schema is incompatible with
-the declared mode. Prompt-and-parse is not a fallback. Successful structured
-content remains JSON text at this package boundary unless a later public API
-adds a separately bounded decoded-object response.
+the declared mode. Prompt-and-parse is not a fallback. V1 admits a documented
+closed JSON Schema dialect rather than accepting arbitrary keywords it cannot
+enforce. The codec validates the supplied schema before admission, boundedly
+decodes successful structured content, requires an object, and validates that
+object against the exact admitted schema. Unsupported schema keywords and
+response mismatches are closed errors. The normalized response retains
+canonical JSON text for compatibility, but that text is produced only from the
+already bounded and validated object; the PtcRunner adapter does not parse raw
+provider JSON or perform a second schema interpretation.
 
 ### Cache policy
 
@@ -655,6 +1037,10 @@ Cache translation is closed and target-declared. Start with `:unsupported`.
 Add an OpenAI-compatible ephemeral-content mode only after a local fixture
 proves exact request bytes for a supported endpoint. `cache: true` against an
 unsupported target fails before connection; it is never silently ignored.
+Before PtcRunner cutover, every retained cache-enabled target must either have
+that exact supported mode or be rejected by PtcRunner's installation migration.
+Cache is therefore a release checkpoint, not merely optional post-parity
+hardening.
 
 ### Streaming and SSE
 
@@ -721,7 +1107,7 @@ case counts in CI and deterministic seeds in reproduction output.
 | Scripted-backend tests | Deadline, cancellation, partial reads/writes, cleanup |
 | Raw TCP/TLS integration | Actual OTP socket semantics and one-connection behavior |
 | Codec fixtures | Exact OpenAI/Ollama request and normalized response behavior |
-| Concurrency tests | Global/group admission, atomic refusal, crash recovery, owner death |
+| Concurrency tests | Runtime/group admission, atomic refusal, crash recovery, owner death |
 | Release smoke | TLS trust and application startup in an assembled minimal release |
 | PtcRunner contract tests | Thin adapter mapping, routing, limits, errors, traces, gateway cancellation |
 
@@ -737,6 +1123,9 @@ case counts in CI and deterministic seeds in reproduction output.
 - caller death during every external blocking phase;
 - slot release after success, every error, callback failure, timeout, kill, and
   runtime-owner failure;
+- admission-owner death during each external phase and both sides of every
+  terminal-value handoff, proving guardian cleanup and no candidate in shared
+  state;
 - no retry after partial send, timeout, 429, 5xx, refusal, or close; and
 - no environment proxy, credential, or endpoint lookup.
 
@@ -829,10 +1218,11 @@ consumer repository owns its pinned-dependency integration gate.
 ### Development override
 
 PtcRunner may add a dev/test-only `PTC_LLM_HTTP_PATH` dependency override using
-the same pattern it already uses for `PTC_EX_DNA_PATH`. Published and
-production builds always resolve the pinned Git/Hex dependency. The override
-must stay set consistently for every Mix command in that build and must never
-affect the lock used by releases.
+the same pattern it already uses for `PTC_EX_DNA_PATH`. Pre-release integration
+may resolve an exact Git commit. Published and production PtcRunner builds must
+resolve a published Hex requirement. The override must stay set consistently
+for every Mix command in that build and must never affect the lock used by
+releases.
 
 Do not add this project as a nested Git repository inside PtcRunner. That would
 keep its changes in PtcRunner's path classifier and preserve the slow push
@@ -842,16 +1232,32 @@ problem this extraction is intended to solve.
 
 The PtcRunner adapter:
 
-- compiles its tagged host target into `PtcLlmHttp.Target`;
-- resolves one credential lease and constructs the opaque credential value;
-- supplies the absolute provider/run deadline;
-- acquires PtcRunner's logical VM/group/alias provider admission;
-- calls the package runtime for physical connection admission and transport;
+- receives an already canonical `PtcLlmHttp.Target` wrapped by the tagged host
+  target; PtcRunner validates host structure but does not duplicate HTTP
+  URL/path canonicalization;
+- redeems one caller-bound credential-vault lease under the absolute deadline;
+  the PtcRunner vault monitors this adapter worker and atomically revokes on
+  explicit release or `DOWN`, while the package attempt independently monitors
+  the adapter and owns cleanup of its credential copy;
+- receives the contextual requester's already-anchored absolute provider/run
+  deadline, cancellation identity, and authorized private-inspection sink;
+- passes the package share of PtcRunner's generated aggregate provider-process
+  budget; the package alone derives its versioned internal partition and clamps
+  every per-attempt process;
+- receives an already-held PtcRunner logical VM/group/alias lease acquired by
+  the host-owned routing layer above adapter selection; this HTTP adapter does
+  not own or bypass logical admission;
+- calls the generation-bound package runtime handle atomically returned with
+  the already-held logical lease; target/capability closures never retain a
+  runtime PID or rebind across PtcRunner host generations;
 - maps normalized response/tool/usage data into `PtcRunner.LLM` values;
-- maps `%PtcLlmHttp.Error{}` facts into bounded `ProviderError` and private
-  inspection evidence;
-- bridges synchronous stream callbacks into the existing adapter streaming
-  contract without an unbounded mailbox; and
+- maps package stream completion into a provider-neutral Runner completion with
+  no content field; a PtcRunner-owned wrapper accumulates chunks under the
+  retained-result limit only for callers that explicitly request full content;
+- maps `%PtcLlmHttp.Error{}` facts into bounded `ProviderError` and the same
+  closed safe facts in authorized private inspection;
+- invokes synchronous stream callbacks directly under the revised private
+  adapter behavior, including the exact tagged early-halt outcome; and
 - records alias, installation revision, logical call budget, and safe transport
   metadata in PtcRunner-owned traces.
 
@@ -862,16 +1268,27 @@ wrong or incomplete.
 ### Integration checkpoints
 
 1. Pin the bootstrap package and prove compile/application startup only.
-2. Integrate target construction and redaction without selecting the new
+2. Land PtcRunner's contextual requester, run-owned credential vault and
+   per-invocation lease redemption, schema pass-through, callback stream
+   behavior, positive output-token default, closed error mapping, and singleton
+   runtime lifecycle while ReqLLM remains selected for command-owned use;
+   host-owned transitional ReqLLM targets are rejected because their live Finch
+   pool cannot be safely reconfigured or attested.
+3. Integrate target construction and redaction without selecting the new
    adapter.
-3. Run an OpenAI-compatible local fixture through the full Kernel requester.
-4. Run adapter parity fixtures for text, errors, tools, structured output,
+4. Run an OpenAI-compatible local fixture through the full Kernel requester.
+5. Run adapter parity fixtures for text, errors, tools, structured output,
    usage, and streaming.
-5. Run concurrent command/host/gateway tests proving logical and physical
+6. Run concurrent command/host/gateway tests proving logical and physical
    capacity interact without pool starvation or leaks.
-6. Run supported live E2E against one OpenAI-compatible endpoint.
-7. Make the new adapter selectable while ReqLLM remains available.
-8. Cut over shipped examples/defaults, then remove ReqLLM under the companion
+7. Prove every retained cache-enabled installation has a supported translation
+   or a closed migration rejection, and document opaque versus controlled
+   gateway upstream routing.
+8. Run supported live E2E against one OpenAI-compatible endpoint.
+9. Make the new adapter selectable while ReqLLM remains available only in the
+   explicitly bounded command-owned transition.
+10. Publish the required Hex version, cut over shipped examples/defaults, then
+   remove ReqLLM under the companion
    plan.
 
 Update the package pin only at these coherent checkpoints. Root `mix.exs`,
@@ -880,20 +1297,28 @@ full compile/precommit/push verification.
 
 ## Delivery slices
 
-### Slice 0 — bootstrap and contract freeze
+### Slice 0 — repository bootstrap — complete
 
-- Create the repository infrastructure and public module skeleton.
-- Record supported Elixir/OTP candidates.
-- Finalize opaque types and error vocabulary without implementing HTTP.
-- Add redaction and constructor contract tests first.
-- Establish `mix check`, `mix full_check`, CI, and package contents.
+Completed by `bae77e0` and follow-up infrastructure commits through `cebdd8f`.
+The public namespace remains pre-alpha and cannot perform a network request.
 
-Exit: a tagged `0.0.1`-style development checkpoint can be pinned by
-PtcRunner, but performs no network request.
+- Created the repository infrastructure, public module skeleton, application
+  smoke, license, instructions, and retained protocol-evidence document.
+- Recorded supported Elixir/OTP candidates without claiming a minimum OTP.
+- Established the repository-owned fast/full gates, CI, hooks, and package/
+  release verification infrastructure.
+
+Exit met at `cebdd8f`: the bootstrap can be pinned by PtcRunner and performs no
+network request. Opaque runtime/target/credential/deadline types plus their
+constructor/redaction tests belong to Slice 2. The base closed error type and
+runtime/resource contract entries also belong to Slice 2; Slice 4 completes and
+versions the HTTP/provider partitions.
 
 ### Slice 1 — socket/TLS feasibility spike
 
 - Implement disposable TCP/TLS `recv_up_to` probes and the full spike matrix.
+- Prove acceptable handshake/certificate-chain allocation bounds, including an
+  oversized-chain fixture.
 - Decide pure OTP versus capped port helper.
 - Fix the minimum OTP and release trust-source strategy.
 - Delete disposable probe code that is not part of the selected backend; keep
@@ -905,8 +1330,16 @@ with a documented blocker before building on an unsafe primitive.
 ### Slice 2 — target, credential, deadline, and admission runtime
 
 - Implement opaque constructors and redacted inspection.
+- Freeze runtime, target, credential, deadline, and the base closed error public
+  types; add constructor/redaction and runtime/resource error-contract tests
+  before use.
 - Implement absolute deadlines.
-- Implement atomic global/group physical admission and fail-stop ownership.
+- Implement the required aggregate `ProcessBudget`, per-role heap ceilings,
+  fail-stop per-attempt ownership tree, and closed resource-limit error path.
+- Implement the stable guardian plus fail-stop `:one_for_all` generation,
+  atomic runtime/group physical admission, supervised attempt/socket ownership,
+  and generation fencing; prove admission-owner restart cannot reset counters or
+  publish readiness under surviving attempts.
 - Prove release on every lifecycle path using a scripted backend.
 
 Exit: no HTTP parsing yet, but one attempt can be safely admitted, cancelled,
@@ -916,6 +1349,9 @@ and cleaned up.
 
 - Implement DNS, TCP/TLS connect, request serialization, send, incremental
   response parser, content-length, and chunked framing.
+- Enforce the compiled connect-address policy on every literal/resolved address
+  and pin one approved address while preserving the original DNS Host/SNI name;
+  reject HTTPS IP literals.
 - Add raw TCP/TLS fixtures and property-based fragmentation tests.
 - Enforce single connection/attempt, no redirects/compression/retries.
 
@@ -925,17 +1361,22 @@ provider semantics.
 ### Slice 4 — OpenAI-compatible text and errors
 
 - Implement target operation paths, message request codec, text response,
-  provider error facts, and usage extraction.
+  complete/version the closed HTTP/provider error contract plus completeness
+  tests, provider error facts including dispatch state, and usage extraction.
 - Add exact wire fixtures and local integration.
-- Integrate PtcRunner text calls at a pinned package revision.
+- Integrate PtcRunner text calls at a pinned package revision only after its
+  contextual requester, explicit deadline, singleton runtime, closed error
+  mapping, and positive output-token default exist.
 
-Exit: text parity is independently releasable while ReqLLM remains selected for
-other capability modes.
+Exit: text parity is independently releasable while command-owned ReqLLM remains
+selected for other capability modes; hosted use selects the direct adapter or
+fails installation.
 
 ### Slice 5 — tools and structured output
 
 - Implement tool definitions, assistant/tool messages, parallel tool calls,
-  bounded argument decoding, and declared structured-output modes.
+  bounded argument decoding, the admitted JSON Schema dialect, and response
+  validation for declared structured-output modes.
 - Add all closed malformed/null/oversized outcomes.
 - Run PtcRunner tool-loop and schema parity fixtures.
 
@@ -944,17 +1385,23 @@ Exit: non-streaming Kernel capability parity for supported targets.
 ### Slice 6 — streaming
 
 - Implement bounded SSE parsing and synchronous text-delta callbacks.
-- Prove backpressure, cancellation, early halt, terminal usage, and cumulative
-  caps.
-- Add the PtcRunner Enumerable bridge and gateway disconnect tests in the
-  consumer repository.
+- Prove backpressure, deadline cleanup while the callback is permanently
+  blocked, cancellation, the exact tagged early-halt/partial-usage contract,
+  terminal usage, and cumulative caps.
+- Add PtcRunner direct callback-consumption and gateway disconnect tests in the
+  consumer repository; no Enumerable bridge or producer mailbox is permitted.
 
 Exit: text streaming parity without tool-delta support.
 
 ### Slice 7 — cache mode, observability, and hardening
 
-- Add only the cache translation proven by a real supported endpoint.
-- Finalize safe numeric metadata and private error-evidence access.
+- Add every cache translation required by a retained PtcRunner target, each
+  proven by exact fixtures; otherwise record the corresponding installation
+  migration rejection before cutover.
+- Add closed upstream-routing capabilities required by supported gateways and
+  label all other gateway routing opaque.
+- Finalize safe numeric metadata and the private-inspection projection of the
+  same closed error facts; no provider-text evidence channel is added.
 - Run fuzz/property expansion, TLS release smoke, dependency audit, docs, and
   independent security review.
 
@@ -971,8 +1418,10 @@ Exit: current PtcRunner Ollama use is migrated without prompt flattening.
 
 ### Slice 9 — stable integration release
 
-- Publish or tag the exact package revision.
-- Pin it in PtcRunner and run the root full gate, release verification, focused
+- Publish the exact package version to Hex. A Git tag or commit is only a
+  pre-release integration checkpoint and cannot satisfy this slice.
+- Pin the Hex requirement in PtcRunner, extend its package-metadata verifier,
+  and run the root full gate, release verification, focused
   independent review, and live supported E2E.
 - Document supported/unsupported providers and the failover implication:
   native Bedrock requires another adapter or an OpenAI-compatible gateway.
@@ -981,22 +1430,49 @@ Exit: current PtcRunner Ollama use is migrated without prompt flattening.
 ## Acceptance matrix
 
 - Target and credential rejection occurs before DNS/connect.
+- Literal and every resolved address is authorized by the target's closed
+  connect policy immediately before the single pinned connect; HTTPS IP
+  literals are rejected and Host/SNI retain the original DNS hostname.
 - One call opens at most one socket and produces at most one HTTP request.
-- Global/group saturation is atomic, fail-fast, and observable.
+- Runtime/group saturation is atomic, fail-fast, and observable; independent
+  runtime instances are explicitly independent capacity domains.
+- Runtime concurrency/group counts and shared admission/supervisor heaps satisfy
+  the fixed control-memory formula; control overflow poisons the generation.
+- Guardian fallback teardown observes every old attempt/role `DOWN` before a new
+  generation becomes ready, including admission-owner failure mid-handoff.
 - Success, every error, timeout, cancellation, callback failure, caller death,
   and runtime-owner failure release or poison capacity exactly as specified.
+- Every value-bearing response, stream completion/halt, and classified error
+  travels only from the bounded relay to the bounded authorized caller and
+  becomes returnable only after opaque arbitration/teardown/lease commit; shared
+  control owners never retain or copy it, and superseded candidates are
+  discarded.
+- Every package-owned allocation process has a non-disableable role ceiling,
+  all concurrent role ceilings fit one aggregate attempt budget, and forced
+  heap kills return the closed resource-limit outcome only after the full
+  attempt tree is down.
 - TCP and TLS `recv_up_to` satisfy prompt partial delivery and exact caps.
+- TLS handshake and certificate-chain processing satisfy the selected bounded
+  resource contract or the transport stops at the feasibility gate.
 - Request targets and headers are injection-safe and encoded exactly once.
 - Status, headers, chunk framing, trailers, SSE, body, JSON, tool arguments,
   and decoded text remain within independent caps under arbitrary
   fragmentation.
 - Redirects, compression, ambiguous framing, close-delimited bodies, proxy
   environment, and transparent retries are impossible in V1.
-- Text, tools, structured output, streaming, and usage match the documented
-  normalized contract on supported OpenAI-compatible fixtures.
+- Text, tools, structured output, synchronous streaming with `:cont | :halt`,
+  usage, required cache modes, and upstream-routing declarations match the
+  documented normalized contract on supported OpenAI-compatible fixtures.
+- Stream success returns completion/usage metadata without retained content;
+  only the consumer's separately bounded wrapper may accumulate full text.
+- Errors carry sufficient closed kind, phase, status/code, scope, and dispatch
+  state for PtcRunner's complete `ProviderError` mapping without raw-body
+  inspection.
 - No ordinary inspection/log/telemetry path discloses target, model, prompt,
   tool arguments, credential, header, body, or provider text.
 - The package builds and its TLS trust works in a minimal release.
+- The production integration uses a published Hex package; Git/path pins remain
+  development checkpoints only.
 - Minimum and current supported Elixir/OTP jobs pass.
 - PtcRunner integration contains transport mapping, not a second HTTP/parser
   implementation.
@@ -1009,14 +1485,17 @@ Exit: current PtcRunner Ollama use is migrated without prompt flattening.
 
 This is the primary technical stop condition. Do not build a streaming parser
 on an API that can either block for the requested maximum or deliver an
-unbounded record.
+unbounded record. The same stop condition covers TLS handshake records and
+certificate-chain allocation before application-data reads.
 
 ### Scope creep into ReqLLM
 
 Reject model catalogs, pricing inference, prompt frameworks, arbitrary
-provider options, native provider protocols, retries, and failover. When a
-feature request is provider-specific, prefer a separate adapter or an explicit
-target capability backed by fixtures.
+provider options, native provider protocols, client retries, and
+client-initiated failover. When a feature request is provider-specific, prefer
+a separate adapter or an explicit target capability backed by fixtures. A
+closed gateway control that disables upstream fallback is routing declaration,
+not package-initiated failover.
 
 ### Cross-repository drift
 
@@ -1047,7 +1526,8 @@ measurements do not authorize silently enabling Finch or keep-alive.
   cloud identity chains;
 - logical provider-task admission, per-alias call quotas, cost budgets, or
   workflow limits;
-- provider failover, circuit breakers, retries, or fallback prompts;
+- client-initiated provider failover, circuit breakers, retries, or fallback
+  prompts;
 - an incoming HTTP/MCP server;
 - HTTP proxying, cookies, redirects, compression, WebSockets, HTTP/2, or HTTP/3;
 - embeddings unless PtcRunner first defines a provider-neutral embedding
