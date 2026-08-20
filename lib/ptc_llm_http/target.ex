@@ -138,6 +138,23 @@ defmodule PtcLlmHttp.Target do
   @spec max_encoded_request_bytes(t()) :: pos_integer()
   def max_encoded_request_bytes(%__MODULE__{max_encoded_request_bytes: maximum}), do: maximum
 
+  @doc false
+  def codec_options(%__MODULE__{} = target) do
+    %{
+      kind: target.kind,
+      model: target.model,
+      tools: target.tools,
+      streaming: target.streaming,
+      structured_output: target.structured_output,
+      cache_mode: target.cache_mode,
+      upstream_routing: target.upstream_routing,
+      usage_guarantees: target.usage_guarantees,
+      codec_version: target.codec_version,
+      max_encoded_request_bytes: target.max_encoded_request_bytes,
+      max_wire_response_bytes: target.max_wire_response_bytes
+    }
+  end
+
   defp exact_options(options) do
     if Keyword.keyword?(options) and length(options) == length(@keys) and
          Enum.sort(Keyword.keys(options)) == Enum.sort(@keys) do

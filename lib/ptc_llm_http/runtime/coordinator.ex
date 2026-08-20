@@ -102,17 +102,24 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
   end
 
   def handle_info(
-        {:role_result, operation_ref, {:ok, {:http_dns, {:error, _reason}}}},
+        {:role_result, operation_ref, {:ok, {:http_dns, {:error, :no_trust_store}}}},
         %{operation_ref: operation_ref, mode: :http, step: :dns} = state
       ) do
-    terminal(state, fn -> deliver(state, {:error, http_error(state)}) end)
+    classify_trust_failure(state)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref, {:ok, {:http_dns, {:error, reason}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :dns} = state
+      ) do
+    terminal(state, fn -> deliver(state, {:error, dns_error(state, reason)}) end)
   end
 
   def handle_info(
         {:role_result, operation_ref, {:ok, {:http_exchange, {:ok, response}}}},
         %{operation_ref: operation_ref, mode: :http, step: :socket} = state
       ) do
-    terminal(state, fn -> deliver(state, {:ok, response}) end)
+    dispatch_decode(state, response)
   end
 
   def handle_info(
@@ -123,8 +130,29 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
   end
 
   def handle_info(
-        {:role_result, operation_ref, {:ok, {:http_exchange, {:error, _reason}}}},
+        {:role_result, operation_ref, {:ok, {:http_exchange, {:error, reason}}}},
         %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      ) do
+    terminal(state, fn -> deliver(state, {:error, http_error(state, reason)}) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref, {:ok, {:http_decode, {:ok, _value} = candidate}}},
+        %{operation_ref: operation_ref, mode: :http, step: :codec} = state
+      ) do
+    terminal(state, fn -> deliver(state, candidate) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref, {:ok, {:http_decode, {:error, %Error{}} = candidate}}},
+        %{operation_ref: operation_ref, mode: :http, step: :codec} = state
+      ) do
+    terminal(state, fn -> deliver(state, candidate) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref, {:ok, {:http_decode, _invalid}}},
+        %{operation_ref: operation_ref, mode: :http, step: :codec} = state
       ) do
     terminal(state, fn -> deliver(state, {:error, http_error(state)}) end)
   end
@@ -264,6 +292,39 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
     {:noreply, %{state | step: :socket}}
   end
 
+  defp classify_trust_failure(state) do
+    case update_progress(state, :tls, :not_sent) do
+      {:ok, state} ->
+        terminal(state, fn ->
+          deliver(state, {:error, Error.build!(:tls_failure, :tls, :transport, :not_sent)})
+        end)
+
+      {:error, :deadline_exceeded, state} ->
+        report_cause(state, :deadline_exceeded)
+        {:noreply, %{state | terminal: true}}
+
+      {:error, :runtime_unavailable, state} ->
+        {:noreply, %{state | terminal: true}}
+    end
+  end
+
+  defp dispatch_decode(%{binding: binding, operation: operation} = state, response) do
+    case update_progress(state, :decode, :completed) do
+      {:ok, state} ->
+        operation_ref = state.operation_ref
+        role_operation = fn -> {:ok, {:http_decode, operation.decoder.(response)}} end
+        Role.run(binding.roles.codec, self(), operation_ref, role_operation)
+        {:noreply, %{state | step: :codec}}
+
+      {:error, :deadline_exceeded, state} ->
+        report_cause(state, :deadline_exceeded)
+        {:noreply, %{state | terminal: true}}
+
+      {:error, :runtime_unavailable, state} ->
+        {:noreply, %{state | terminal: true}}
+    end
+  end
+
   defp update_progress(%{binding: binding} = state, phase, dispatch) do
     case Deadline.remaining(binding.deadline) do
       {:ok, remaining} ->
@@ -307,8 +368,35 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
     end
   end
 
+  defp http_error(%{progress: {phase, dispatch}}, reason),
+    do: Error.build!(http_kind(reason, phase), phase, :transport, dispatch)
+
+  defp dns_error(%{progress: {phase, dispatch}}, :address_rejected),
+    do: Error.build!(:address_rejected, phase, :transport, dispatch)
+
+  defp dns_error(%{progress: {phase, dispatch}}, _reason),
+    do: Error.build!(:dns_failure, phase, :transport, dispatch)
+
   defp http_error(%{progress: {phase, dispatch}}),
     do: Error.build!(:internal_failure, phase, :transport, dispatch)
+
+  defp http_kind(_reason, :tls), do: :tls_failure
+
+  defp http_kind(reason, _phase)
+       when reason in [
+              :connect_failure,
+              :tls_failure,
+              :connection_closed,
+              :malformed_http,
+              :response_too_large,
+              :unsupported_redirect,
+              :unsupported_content_encoding,
+              :unsupported_transfer_encoding,
+              :unsupported_framing
+            ],
+       do: reason
+
+  defp http_kind(_reason, _phase), do: :internal_failure
 
   defp stop_active_role(%{binding: binding, step: step}) do
     role = if step == :dns, do: binding.roles.dns, else: binding.roles.socket

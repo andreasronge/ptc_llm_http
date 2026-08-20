@@ -83,7 +83,8 @@ defmodule PtcLlmHttp.Runtime.Guardian do
              :tls,
              :send,
              :receive_head,
-             :receive_body
+             :receive_body,
+             :decode
            ] and dispatch in [:not_sent, :possibly_sent, :completed] do
     mutating_call(
       guardian,
@@ -100,7 +101,8 @@ defmodule PtcLlmHttp.Runtime.Guardian do
              :tls,
              :send,
              :receive_head,
-             :receive_body
+             :receive_body,
+             :decode
            ] and dispatch in [:not_sent, :possibly_sent, :completed] and is_integer(timeout) and
              timeout > 0 do
     progress_call(

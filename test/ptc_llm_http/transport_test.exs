@@ -88,12 +88,10 @@ defmodule PtcLlmHttp.TransportTest do
         "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n"
       )
 
-    assert {:error,
-            %Error{
-              kind: :internal_failure,
-              phase: :receive_head,
-              dispatch: :possibly_sent
-            }} = Task.await(task, 5_000)
+    assert {:error, %Error{} = error} = Task.await(task, 5_000)
+    assert error.kind == :unsupported_framing
+    assert error.phase == :receive_head
+    assert error.dispatch == :possibly_sent
 
     assert RawServer.connection_count(server) == 1
     assert :ok = RawServer.await_close(server)
@@ -170,7 +168,7 @@ defmodule PtcLlmHttp.TransportTest do
 
     :ok = RawServer.write(server, "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n")
 
-    assert {:error, %Error{kind: :internal_failure}} = Task.await(task, 5_000)
+    assert {:error, %Error{kind: :response_too_large}} = Task.await(task, 5_000)
     assert :ok = RawServer.await_close(server)
     assert RawServer.connection_count(server) == 1
   end
@@ -209,7 +207,7 @@ defmodule PtcLlmHttp.TransportTest do
 
     assert {:error,
             %Error{
-              kind: :internal_failure,
+              kind: :connect_failure,
               phase: :connect,
               dispatch: :not_sent
             }} =
@@ -224,6 +222,38 @@ defmodule PtcLlmHttp.TransportTest do
                resolver: fn "localhost" -> {:ok, [{127, 0, 0, 1}]} end,
                trust: ["unused for a refused TCP connection"]
              )
+  end
+
+  test "missing HTTPS trust is a TLS failure before connecting" do
+    server = start_supervised!({RawServer, [transport: :tcp]})
+    runtime = runtime()
+
+    target =
+      target(
+        base_url: "https://localhost:#{RawServer.port(server)}",
+        connect_policy: {:allow_cidrs, ["127.0.0.0/8"]}
+      )
+
+    assert {:error,
+            %Error{
+              kind: :tls_failure,
+              phase: :tls,
+              dispatch: :not_sent
+            }} =
+             Transport.request(
+               runtime,
+               target,
+               Credential.none(),
+               ["echo"],
+               "{}",
+               budget(),
+               deadline(),
+               resolver: fn "localhost" -> {:ok, [{127, 0, 0, 1}]} end,
+               trust: []
+             )
+
+    assert RawServer.connection_count(server) == 0
+    assert {:ok, %{in_use: 0}} = Runtime.snapshot(runtime)
   end
 
   test "socket effects wait for guardian progress acknowledgement" do

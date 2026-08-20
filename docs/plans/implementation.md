@@ -4,9 +4,10 @@
 2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
 `bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
 the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
-is OTP 26, and the trust source is OTP's in-memory platform store. Slices 2 and
-3 added the validated call contracts, fail-stop admission runtime, and bounded
-HTTP/1 core. Provider semantics and the public call API remain for Slice 4.
+is OTP 26, and the trust source is OTP's in-memory platform store. Slices 2
+through 4 added the validated call contracts, fail-stop admission runtime,
+bounded HTTP/1 core, and independently usable OpenAI-compatible text calls.
+Tools and structured output remain for Slice 5.
 
 ## Goal
 
@@ -446,7 +447,38 @@ connection, content-length, content-type, transfer-encoding, and cookies.
 
 ### Request
 
-`PtcLlmHttp.Request.new/1` accepts a provider-neutral request containing:
+The Slice 4 text surface is exact:
+
+```elixir
+{:ok, request} =
+  PtcLlmHttp.Request.new(
+    system: "Answer briefly.",
+    messages: [
+      %{role: :user, content: "Hello"},
+      %{role: :assistant, content: "Hi"},
+      %{role: :user, content: "Continue"}
+    ],
+    max_tokens: 512,
+    temperature: 0.2,
+    seed: 7,
+    cache: false
+  )
+```
+
+Only `messages` is required. The other keys default to `nil`, except `cache`,
+which defaults to `false`. Unknown or duplicate keys are rejected. Slice 4
+accepts nonempty UTF-8 `system`, `user`, and `assistant` text only; tool
+definitions, assistant tool calls, tool results, and structured-output keys are
+added with their complete validation contract in Slice 5 rather than accepted
+early in a partially checked form.
+
+`max_tokens` is a positive integer and `seed` is a signed integer; both are
+bounded to the signed 64-bit range before encoding. Temperature is numeric in
+the closed interval from zero through two. These local numeric ceilings keep
+JSON sizing bounded independently of provider behavior.
+
+The completed request constructor through Slice 5 accepts a provider-neutral
+request containing:
 
 - optional system text;
 - ordered messages with roles `system`, `user`, `assistant`, and `tool`;
@@ -572,6 +604,12 @@ Response, tool-call, usage, and stream-chunk values are opaque or have redacted
 access is explicit because those values may be private even after successful
 normalization.
 
+For non-streaming text, the explicit accessors are `Response.content/1`,
+`Response.usage/1`, `Response.metadata/1`, and `Usage.facts/1`. Metadata contains
+only status, encoded JSON request bytes, identity response-body bytes,
+informational-response count, and trailer-field count. It contains no endpoint,
+model, headers, prompt, output, provider message, or raw error data.
+
 The package never calculates price. A cost value is present only when the
 response reports it and the codec has an exact documented field mapping.
 Missing optional usage remains absent rather than becoming zero. Missing usage
@@ -611,7 +649,8 @@ Provider error codes exposed publicly are atoms from a closed, codec/version-
 specific enum or `nil`; unknown raw codes are discarded and take the default
 status mapping. No arbitrary string or open-ended scope crosses the boundary.
 
-Slice 2 publishes the non-wire entries as `error-base-v1`.
+Slice 2 published the non-wire entries as `error-base-v1`; Slice 4 completes
+the HTTP/OpenAI-compatible entries as `error-openai-v1`.
 `PtcLlmHttp.Error.contract/0` returns that version plus a bounded sorted list of
 disjoint contract entries. Each entry has a stable ID and enumerates its exact
 kind, allowed phases, HTTP status list/ranges, provider-code atoms, scopes, and
@@ -620,6 +659,12 @@ constructible error matches exactly one entry. Adding or changing any enum,
 status partition, provider-specific refinement, or entry is a versioned cross-
 repository contract change and must update PtcRunner's generated exhaustive
 mapping test in the same integration checkpoint.
+
+The first documented provider-code enum contains
+`:credit_balance_exhausted`, `:organization_spend_limit_exceeded`,
+`:organization_usage_limit_exceeded`, and `:project_spend_limit_exceeded`.
+Unknown strings and provider error text are discarded; status-only
+classification remains available.
 
 The error carries stable facts, not a retry/failover decision: kind, phase,
 optional HTTP status, optional closed provider error code, one required closed
@@ -1387,19 +1432,27 @@ without provider semantics. The transport entry point remains internal; Slice
 4 owns the provider-neutral request/response structs, public call API, and the
 versioned HTTP/provider error partitions.
 
-### Slice 4 — OpenAI-compatible text and errors
+### Slice 4 — OpenAI-compatible text and errors — complete
 
-- Implement target operation paths, message request codec, text response,
-  complete/version the closed HTTP/provider error contract plus completeness
-  tests, provider error facts including dispatch state, and usage extraction.
-- Add exact wire fixtures and local integration.
-- Integrate PtcRunner text calls at a pinned package revision only after its
-  contextual requester, explicit deadline, singleton runtime, closed error
-  mapping, and positive output-token default exist.
+- Added the exact provider-neutral text request surface, redacted normalized
+  response and usage values, and the public one-attempt `call/4` API.
+- Added deterministic `/chat/completions` encoding with model insertion,
+  ordered system/user/assistant messages, `n: 1`, non-stream selection, and
+  bounded optional output-token, temperature, and seed fields.
+- Added bounded JSON decoding in the attempt codec role, one usable assistant
+  choice, optional or guaranteed token/cost usage extraction, and explicit
+  OpenRouter cached-token/cost mappings.
+- Completed `error-openai-v1` with classified DNS, connect, TLS, framing,
+  response-limit, HTTP status, provider-code, and malformed-response facts;
+  completeness tests enumerate every contract entry. Documented quota codes
+  are retained only on HTTP 429 responses.
+- Added exact raw-loopback request/response fixtures proving one connection,
+  terminal handoff, redaction, usage, error text discard, pre-connect
+  capability rejection, and physical lease release.
 
-Exit: text parity is independently releasable while command-owned ReqLLM remains
-selected for other capability modes; hosted use selects the direct adapter or
-fails installation.
+Exit met in this package: text calls are independently releasable. PtcRunner
+cutover remains a pinned integration checkpoint and is intentionally not
+performed from this repository.
 
 ### Slice 5 — tools and structured output
 
