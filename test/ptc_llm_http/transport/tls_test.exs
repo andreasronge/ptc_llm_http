@@ -57,6 +57,15 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       assert alert in [:bad_certificate, :handshake_failure]
     end
 
+    test "rejects a certificate that names the host only in its common name" do
+      # RFC 9110 section 4.3.4: a client must not accept a CN-ID. The leaf here
+      # says `CN=localhost` and carries no subject alternative name at all.
+      server = start_peer(Certificates.build(names: [], common_name: "localhost"))
+
+      assert {:error, {:tls, alert}} = open(server, deadline(5_000))
+      assert alert in [:bad_certificate, :handshake_failure]
+    end
+
     test "rejects a chain that no trusted authority signed" do
       stranger = Certificates.build()
       server = start_peer(Certificates.build(trusted_by: [stranger.authority]))
@@ -178,6 +187,13 @@ defmodule PtcLlmHttp.Transport.TlsTest do
       # must fail; what it must not do is proceed.
       assert {:error, {:tls, :unknown_ca}} =
                open(server, deadline(5_000), trust: ["not a certificate"])
+    end
+
+    test "does not start loading platform trust once the deadline has passed" do
+      server = start_peer()
+
+      assert {:error, :timeout} = open(server, expired_deadline(), trust: :system)
+      assert RawServer.connection_count(server) == 0
     end
 
     test "reaches the platform trust store rather than failing for want of one" do

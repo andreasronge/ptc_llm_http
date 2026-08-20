@@ -180,6 +180,11 @@ This package ships no CA bundle and adds no CA dependency.
 
 A host without usable trust material fails the connection with
 `:no_trust_store` — whether the store could not be read or was read and held
-nothing, and equally for an empty caller-supplied list. There is no fallback to unverified TLS, and no environment
+nothing, and equally for an empty caller-supplied list.
+
+The first `cacerts_get/0` in a node's life reaches the filesystem, so it runs
+in a task the caller abandons at the deadline. An attempt that was given 200 ms
+must not spend a minute inside a trust store that will not answer; later calls
+hit OTP's cache and cost nothing. There is no fallback to unverified TLS, and no environment
 lookup. Callers may pass their own DER-encoded authorities instead; a
 target-specific trust input is deferred until a deployment needs one.

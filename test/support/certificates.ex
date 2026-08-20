@@ -21,7 +21,8 @@ defmodule PtcLlmHttp.Test.Certificates do
   Builds a server bundle: a root, `:depth` intermediates, and a leaf.
 
     * `:depth` — intermediate CAs between root and leaf (default 1)
-    * `:names` — subject alternative names on the leaf (default `["localhost"]`)
+    * `:names` — subject alternative names on the leaf (default `["localhost"]`);
+      an empty list leaves the leaf with a common name and no SAN at all
     * `:validity` — leaf validity, e.g. an `X509.Certificate.Validity` in the past
     * `:extensions` — extra leaf extensions, such as an oversized one
     * `:trusted_by` — the authorities the client is told to trust (default: this
@@ -47,7 +48,7 @@ defmodule PtcLlmHttp.Test.Certificates do
     leaf =
       X509.Certificate.new(
         X509.PublicKey.derive(key),
-        "/CN=#{hd(names)}",
+        "/CN=#{Keyword.get(options, :common_name, List.first(names, "localhost"))}",
         issuer,
         issuer_key,
         [extensions: leaf_extensions(names, options)] ++ Keyword.take(options, [:validity])
@@ -89,9 +90,11 @@ defmodule PtcLlmHttp.Test.Certificates do
     end)
   end
 
+  defp leaf_extensions([], options), do: Keyword.get(options, :extensions, [])
+
   defp leaf_extensions(names, options) do
-    subject_alt_name = Extension.subject_alt_name(names)
-    [subject_alt_name: subject_alt_name] ++ Keyword.get(options, :extensions, [])
+    [subject_alt_name: Extension.subject_alt_name(names)] ++
+      Keyword.get(options, :extensions, [])
   end
 
   # X509's CA templates carry a path-length constraint, which would reject a
