@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Independent jobs, and a superseded pull-request run is cancelled rather than
+# left to burn a matrix.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HEX_SPONSOR: false
+
+jobs:
+  quality:
+    name: Format, compile, Credo
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+      - run: scripts/ci/quality.sh
+
+  test:
+    name: Tests (current toolchain)
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+      - run: scripts/ci/tests.sh
+
+  # Socket, TLS, and DNS behavior differ between platforms, and this package is
+  # a transport. macOS is a first-class target, not a courtesy run.
+  test-macos:
+    name: Tests (macOS)
+    runs-on: macos-15
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+      - run: scripts/ci/tests.sh
+
+  # PROVISIONAL. The declared minimum in mix.exs matches PtcRunner's `~> 1.15`,
+  # but the minimum OTP release is not a guess to be made here: Slice 1's
+  # socket/TLS spike establishes it from the `:socket` and `:ssl` behavior the
+  # transport actually requires, and this pair must then be updated to match.
+  # ubuntu-22.04 is deliberate -- precompiled OTP 26 builds are published for
+  # it, not for 24.04.
+  compat:
+    name: Minimum supported Elixir/OTP
+    runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+        with:
+          elixir-version: '1.15.8'
+          otp-version: '26.2.5'
+      - run: scripts/ci/tests.sh --include compat
+
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'true'
+      - run: scripts/ci/dialyzer.sh
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+        with:
+          mix-env: dev
+      - run: scripts/ci/docs.sh
+
+  release-package:
+    name: Release smoke and package contents
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: prod
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-elixir
+        with:
+          mix-env: prod
+      - run: scripts/ci/release.sh
+      - run: scripts/ci/package.sh
+      - run: scripts/ci/deps.sh

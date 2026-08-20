@@ -1,0 +1,57 @@
+name: 'Setup Elixir'
+description: 'Install Elixir/OTP and restore the Mix dependency and build caches'
+
+inputs:
+  elixir-version:
+    description: 'Elixir version to install'
+    required: false
+    default: '1.20.2'
+  otp-version:
+    description: 'OTP version to install'
+    required: false
+    default: '29.0.3'
+  mix-env:
+    description: 'MIX_ENV the cache key is scoped to'
+    required: false
+    default: 'test'
+  cache-plt:
+    description: 'Restore and save the Dialyzer PLT cache'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Elixir
+      id: setup-beam
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: ${{ inputs.elixir-version }}
+        otp-version: ${{ inputs.otp-version }}
+
+    # Keyed by OS, architecture, MIX_ENV, toolchain, and mix.lock: a build
+    # compiled by a different Elixir/OTP pair or against different locked
+    # dependency versions is not reusable, and a stale restore is worse than a
+    # cold one because it fails somewhere far from its cause.
+    - name: Cache deps and _build
+      uses: actions/cache@v5
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-${{ runner.arch }}-mix-env${{ inputs.mix-env }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-mix-env${{ inputs.mix-env }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+
+    - name: Cache Dialyzer PLT
+      if: inputs.cache-plt == 'true'
+      uses: actions/cache@v5
+      with:
+        path: priv/plts
+        key: plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+        restore-keys: |
+          plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+
+    - name: Get dependencies
+      run: mix deps.get --check-locked
+      shell: bash

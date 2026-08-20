@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Fast staged-file gate. Seconds, not minutes: formatting and a warning-free
+# compile of what is about to be committed. The full per-commit gate is
+# `mix check`; the deterministic push gate is `.githooks/pre-push`.
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR -- '*.ex' '*.exs')"
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+echo "pre-commit: formatting staged Elixir files"
+# shellcheck disable=SC2086
+mix format --check-formatted $staged
+
+echo "pre-commit: compiling"
+MIX_ENV=test mix compile --warnings-as-errors
+
+echo "pre-commit: ok (run 'mix check' before pushing)"

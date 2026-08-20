@@ -1,0 +1,35 @@
+.DS_Store
+
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
+
+# Temporary files, for example, from tests.
+/tmp/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Ignore package tarball (built via "mix hex.build").
+ptc_llm_http-*.tar
+
+# Dialyzer PLT files (machine-specific, large).
+/priv/plts/
+
+# Private drafts and personal setup notes.
+/private/
+
+# Claude Code worktrees, session state, and personal overrides.
+.claude/worktrees/
+.claude/settings.local.json
