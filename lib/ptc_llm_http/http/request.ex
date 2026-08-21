@@ -2,9 +2,9 @@ defmodule PtcLlmHttp.Http.Request do
   @moduledoc false
 
   alias PtcLlmHttp.{Credential, Limits, Target}
+  alias PtcLlmHttp.Http.Token
 
   @user_agent "ptc_llm_http/0.0.1"
-  @token_special ~c"!#$%&'*+-.^_`|~"
   @pchar_special ~c"!$&'()*+,-.:;=@_~"
 
   @spec encode(Target.t(), Credential.t(), [binary()], binary()) ::
@@ -116,13 +116,8 @@ defmodule PtcLlmHttp.Http.Request do
 
   defp valid_field?({name, value}) do
     byte_size(name) in 1..Limits.header_name_bytes() and
-      byte_size(value) <= Limits.header_value_bytes() and token?(name) and visible_value?(value)
-  end
-
-  defp token?(value) do
-    Enum.all?(:binary.bin_to_list(value), fn byte ->
-      byte in ?A..?Z or byte in ?a..?z or byte in ?0..?9 or byte in @token_special
-    end)
+      byte_size(value) <= Limits.header_value_bytes() and Token.token?(name) and
+      visible_value?(value)
   end
 
   defp visible_value?(value) do
