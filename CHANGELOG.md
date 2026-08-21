@@ -29,7 +29,13 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   rebalances the other roles inside the same total, so callers do not have to
   inflate every ceiling to keep DNS alive. A fresh-OS/BEAM regression covers
   cold and warm `localhost` resolution without a public network.
-
+- OpenAI-compatible text streams now accept OpenRouter's terminal usage event
+  that repeats the already observed empty index-zero finish choice, in addition
+  to the documented OpenAI `choices: []` usage chunk. The usage event is not
+  delivered to the callback and does not increment delivered bytes or chunks.
+  Invalid post-finish content, tool deltas, choice indexes, finish reasons,
+  missing or duplicate usage, and events after `[DONE]` remain malformed
+  streams.
 
 ## [0.1.0] - 2026-08-21
 

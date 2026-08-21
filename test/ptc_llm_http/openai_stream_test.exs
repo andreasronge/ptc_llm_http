@@ -1,6 +1,8 @@
 defmodule PtcLlmHttp.OpenAIStreamTest do
   use ExUnit.Case, async: false
 
+  import PtcLlmHttp.Test.Fragmentation, only: [fragment: 2]
+
   alias PtcLlmHttp.Codecs.{OpenAI, OpenAIStream}
   alias PtcLlmHttp.Http.Request, as: HttpRequest
   alias PtcLlmHttp.Test.RawServer
@@ -339,24 +341,171 @@ defmodule PtcLlmHttp.OpenAIStreamTest do
              Task.await(task, 5_000)
   end
 
-  test "rejects usage attached to a non-terminal choice event" do
-    server = start_supervised!({RawServer, [transport: :tcp]})
-    runtime = runtime()
-    target = target(server, %{tokens: true, cost: false})
-    task = Task.async(fn -> stream(runtime, target, request(), fn _ -> :cont end) end)
-    assert :ok = RawServer.await_connection(server)
-    assert {:ok, _request} = recv_request(server, target, request())
+  test "empty-choice and OpenRouter repeated-finish usage events complete identically" do
+    usage = %{
+      "prompt_tokens" => 13,
+      "completion_tokens" => 9,
+      "total_tokens" => 22
+    }
 
-    body =
+    expected_usage = %{
+      prompt_tokens: 13,
+      completion_tokens: 9,
+      total_tokens: 22,
+      cached_tokens: nil,
+      cost: nil
+    }
+
+    for {reason, usage_choices, sizes} <- [
+          {"stop", [], nil},
+          {"stop", [openrouter_terminal_choice("stop")], [1, 2, 3, 5, 8, 13]},
+          {"length", [openrouter_terminal_choice("length")], nil}
+        ] do
+      server = start_supervised!({RawServer, [transport: :tcp]}, id: make_ref())
+      runtime = runtime(make_ref())
+      target = target(server, %{tokens: true, cost: false})
+      parent = self()
+
+      task =
+        Task.async(fn -> stream(runtime, target, request(), &send_delta(&1, parent)) end)
+
+      assert :ok = RawServer.await_connection(server)
+      assert {:ok, _request} = recv_request(server, target, request())
+
+      body =
+        event(%{"choices" => [%{"index" => 0, "delta" => %{"content" => "hello"}}]}) <>
+          event(%{
+            "choices" => [
+              %{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => reason}
+            ]
+          }) <>
+          event(%{"choices" => usage_choices, "usage" => usage}) <>
+          "data: [DONE]\n\n"
+
+      head =
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" <>
+          "Content-Length: #{byte_size(body)}\r\n\r\n"
+
+      wire = head <> body
+
+      case sizes do
+        nil -> :ok = RawServer.write(server, wire)
+        _fragment_sizes -> Enum.each(fragment(wire, sizes), &RawServer.write(server, &1))
+      end
+
+      assert_receive {:delta, "hello"}
+      refute_receive {:delta, _extra}
+      assert {:ok, %StreamComplete{} = complete} = Task.await(task, 5_000)
+      assert StreamComplete.delivered(complete) == %{bytes: 5, chunks: 1}
+      assert Usage.facts(StreamComplete.usage(complete)) == expected_usage
+      assert :ok = RawServer.await_close(server)
+      assert {:ok, %{in_use: 0}} = Runtime.snapshot(runtime)
+    end
+  end
+
+  test "rejects invalid events after a supported finish reason" do
+    usage = %{
+      "prompt_tokens" => 13,
+      "completion_tokens" => 9,
+      "total_tokens" => 22
+    }
+
+    finish =
       event(%{
-        "choices" => [%{"index" => 0, "delta" => %{"content" => "x"}}],
-        "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+        "choices" => [%{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => "stop"}]
       })
 
-    :ok = send_content_length(server, body)
+    openai_usage = event(%{"choices" => [], "usage" => usage})
 
-    assert {:error, %Error{kind: :malformed_stream, dispatch: :possibly_sent}} =
-             Task.await(task, 5_000)
+    openrouter_usage =
+      event(%{"choices" => [openrouter_terminal_choice("stop")], "usage" => usage})
+
+    repeated = fn attrs ->
+      choice = Map.merge(%{"index" => 0, "delta" => %{"content" => ""}}, attrs)
+      event(%{"choices" => [choice], "usage" => usage})
+    end
+
+    cases = [
+      event(%{"choices" => [%{"index" => 0, "delta" => %{"content" => "x"}}]}),
+      event(%{
+        "choices" => [%{"index" => 0, "delta" => %{"tool_calls" => [%{"index" => 0}]}}]
+      }),
+      event(%{
+        "choices" => [%{"index" => 0, "delta" => %{"function_call" => %{"name" => "f"}}}]
+      }),
+      repeated.(%{"delta" => %{"content" => "x"}, "finish_reason" => "stop"}),
+      repeated.(%{
+        "delta" => %{"tool_calls" => [%{"index" => 0}]},
+        "finish_reason" => "stop"
+      }),
+      repeated.(%{
+        "delta" => %{"function_call" => %{"name" => "f"}},
+        "finish_reason" => "stop"
+      }),
+      event(%{
+        "choices" => [
+          %{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => "stop"},
+          %{"index" => 1, "delta" => %{"content" => ""}, "finish_reason" => "stop"}
+        ],
+        "usage" => usage
+      }),
+      repeated.(%{"index" => 1, "finish_reason" => "stop"}),
+      event(%{
+        "choices" => [%{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => "stop"}]
+      }),
+      repeated.(%{"finish_reason" => "length"}),
+      repeated.(%{}),
+      repeated.(%{"finish_reason" => "tool_calls"}),
+      openai_usage <> openai_usage,
+      openrouter_usage <> openrouter_usage,
+      openai_usage <> openrouter_usage,
+      openai_usage <> "data: [DONE]\n\n" <> event(%{"choices" => []})
+    ]
+
+    prefix =
+      event(%{"choices" => [%{"index" => 0, "delta" => %{"content" => "hello"}}]}) <> finish
+
+    for suffix <- cases do
+      server = start_supervised!({RawServer, [transport: :tcp]}, id: make_ref())
+      runtime = runtime(make_ref())
+      target = target(server, %{tokens: true, cost: false})
+      task = Task.async(fn -> stream(runtime, target, request(), fn _chunk -> :cont end) end)
+      assert :ok = RawServer.await_connection(server)
+      assert {:ok, _request} = recv_request(server, target, request())
+      :ok = send_content_length(server, prefix <> suffix)
+      assert {:error, %Error{kind: :malformed_stream}} = Task.await(task, 5_000)
+      assert :ok = RawServer.await_close(server)
+    end
+  end
+
+  test "rejects usage attached to a non-terminal choice event" do
+    usage = %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+
+    bodies = [
+      event(%{
+        "choices" => [%{"index" => 0, "delta" => %{"content" => "x"}}],
+        "usage" => usage
+      }),
+      event(%{
+        "choices" => [openrouter_terminal_choice("stop")],
+        "usage" => usage
+      })
+    ]
+
+    for body <- bodies do
+      server = start_supervised!({RawServer, [transport: :tcp]}, id: make_ref())
+      runtime = runtime(make_ref())
+      target = target(server, %{tokens: true, cost: false})
+      task = Task.async(fn -> stream(runtime, target, request(), fn _ -> :cont end) end)
+      assert :ok = RawServer.await_connection(server)
+      assert {:ok, _request} = recv_request(server, target, request())
+      :ok = send_content_length(server, body)
+
+      assert {:error, %Error{kind: :malformed_stream, dispatch: :possibly_sent}} =
+               Task.await(task, 5_000)
+
+      assert :ok = RawServer.await_close(server)
+    end
   end
 
   test "redacts the codec stream state" do
@@ -530,6 +679,14 @@ defmodule PtcLlmHttp.OpenAIStreamTest do
   end
 
   defp event(value), do: "data: " <> Jason.encode!(value) <> "\n\n"
+
+  defp openrouter_terminal_choice(reason) do
+    %{
+      "index" => 0,
+      "delta" => %{"content" => "", "role" => "assistant"},
+      "finish_reason" => reason
+    }
+  end
 
   defp finish_event do
     event(%{
