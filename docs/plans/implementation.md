@@ -1594,6 +1594,11 @@ Exit: current PtcRunner Ollama use is migrated without prompt flattening.
 
 - Publish the exact package version to Hex. A Git tag or commit is only a
   pre-release integration checkpoint and cannot satisfy this slice.
+- Publish only through the manually dispatched `hex-publish` environment. Its
+  dry-run mode must authenticate and validate the package without publication;
+  publish mode additionally runs only from `main` and requires an exact
+  `vVERSION` tag naming that commit, the complete release gate, explicit
+  environment approval, and the step-scoped `HEX_API_KEY` environment secret.
 - Pin the Hex requirement in PtcRunner, extend its package-metadata verifier,
   and run the root full gate, release verification, focused
   independent review, and live supported E2E.

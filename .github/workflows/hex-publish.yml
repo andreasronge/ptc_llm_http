@@ -1,0 +1,68 @@
+name: Publish PtcLlmHttp to Hex
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version from mix.exs
+        required: true
+        type: string
+      mode:
+        description: Build only, or publish the tagged release
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hex-publish
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: hex-publish
+    env:
+      EXPECTED_VERSION: ${{ inputs.version }}
+      HEX_SPONSOR: false
+      MIX_ENV: test
+      RELEASE_MODE: ${{ inputs.mode }}
+
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Require the trusted workflow from main
+        run: test "$GITHUB_REF" = "refs/heads/main"
+
+      - name: Set up Elixir
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'true'
+
+      - name: Validate release identity
+        run: scripts/ci/hex-release.sh "$EXPECTED_VERSION" "$RELEASE_MODE" "$GITHUB_REF"
+
+      - name: Run the complete release gate
+        run: mix full_check
+
+      - name: Validate Hex credentials and package without publishing
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          MIX_ENV: dev
+        run: mix hex.publish --dry-run --yes
+
+      - name: Publish package and documentation
+        if: inputs.mode == 'publish'
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          MIX_ENV: dev
+        run: mix hex.publish --yes
