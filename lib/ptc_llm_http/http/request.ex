@@ -3,7 +3,7 @@ defmodule PtcLlmHttp.Http.Request do
 
   alias PtcLlmHttp.{Credential, Limits, Target}
 
-  @user_agent "ptc_llm_http/0.0.1"
+  @user_agent "ptc_llm_http/0.1.0"
   @token_special ~c"!#$%&'*+-.^_`|~"
   @pchar_special ~c"!$&'()*+,-.:;=@_~"
 

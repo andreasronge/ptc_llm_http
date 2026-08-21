@@ -2,6 +2,7 @@ defmodule PtcLlmHttp.HexReleaseScriptTest do
   use ExUnit.Case, async: false
 
   @script Path.expand("../../scripts/ci/hex-release.sh", __DIR__)
+  @version Mix.Project.config()[:version]
   @clean_git_environment Enum.map(
                            ~w(
                              GIT_ALTERNATE_OBJECT_DIRECTORIES
@@ -24,12 +25,12 @@ defmodule PtcLlmHttp.HexReleaseScriptTest do
                          )
 
   test "accepts the current version for a main dry run" do
-    assert {"", 0} = run("0.0.1", "dry-run", "refs/heads/main")
+    assert {"", 0} = run(@version, "dry-run", "refs/heads/main")
   end
 
   test "accepts combined prerelease and build metadata as SemVer" do
     assert {output, 1} = run("1.2.3-rc.1+build.7", "dry-run", "refs/heads/main")
-    assert output =~ "mix.exs version 0.0.1 does not match 1.2.3-rc.1+build.7"
+    assert output =~ "mix.exs version #{@version} does not match 1.2.3-rc.1+build.7"
     refute output =~ "invalid release version"
   end
 
@@ -39,7 +40,7 @@ defmodule PtcLlmHttp.HexReleaseScriptTest do
   end
 
   test "rejects dispatches outside main" do
-    assert {output, 1} = run("0.0.1", "dry-run", "refs/heads/topic")
+    assert {output, 1} = run(@version, "dry-run", "refs/heads/topic")
     assert output =~ "Hex release workflow must be dispatched from main"
   end
 

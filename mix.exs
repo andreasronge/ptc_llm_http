@@ -2,7 +2,7 @@ defmodule PtcLlmHttp.MixProject do
   use Mix.Project
 
   @app :ptc_llm_http
-  @version "0.0.1"
+  @version "0.1.0"
   @source_url "https://github.com/andreasronge/ptc_llm_http"
 
   # The only consumer and this package use one supported baseline: OTP 29.

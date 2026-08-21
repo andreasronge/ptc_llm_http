@@ -9,6 +9,8 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-21
+
 ### Added
 
 - Bounded synchronous OpenAI-compatible text streaming through `stream/5`,
@@ -78,4 +80,5 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   scripts ran every step regardless and reported the last one's status, so a
   Credo or formatting failure could pass the gate.
 
-[Unreleased]: https://github.com/andreasronge/ptc_llm_http/commits/main
+[Unreleased]: https://github.com/andreasronge/ptc_llm_http/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/andreasronge/ptc_llm_http/releases/tag/v0.1.0
