@@ -100,8 +100,8 @@ defmodule PtcLlmHttp.Codecs.OpenAIStream do
     with {:ok, decoded} <- Jason.decode(data),
          true <- is_map(decoded),
          :ok <- OpenAI.stream_json(decoded),
-         {:ok, state} <- retain_usage(decoded, state),
-         {:ok, state, action} <- dispatch_event(decoded, state, callback_role, callback) do
+         {:ok, kind, state} <- retain_usage(decoded, state),
+         {:ok, state, action} <- dispatch_event(kind, decoded, state, callback_role, callback) do
       {action, state}
     else
       {:error, reason} when reason in [:stream_too_large, :callback_misuse] -> {:error, reason}
@@ -109,28 +109,20 @@ defmodule PtcLlmHttp.Codecs.OpenAIStream do
     end
   end
 
-  defp dispatch_event(decoded, state, callback_role, callback) do
-    if usage_only_event?(decoded) do
-      {:ok, state, :cont}
-    else
-      with :ok <- event_order(state, decoded),
-           {:ok, delta, finish_reason} <- text_delta(decoded),
-           {:ok, state} <- update_finished(state, finish_reason) do
-        deliver_delta(state, delta, callback_role, callback)
-      end
+  defp dispatch_event(:usage_only, _decoded, state, _callback_role, _callback),
+    do: {:ok, state, :cont}
+
+  defp dispatch_event(:event, decoded, state, callback_role, callback) do
+    with :ok <- event_order(state, decoded),
+         {:ok, delta, finish_reason} <- text_delta(decoded),
+         {:ok, state} <- update_finished(state, finish_reason) do
+      deliver_delta(state, delta, callback_role, callback)
     end
   end
 
-  defp usage_only_event?(%{"choices" => [], "usage" => value}) when not is_nil(value), do: true
-
-  defp usage_only_event?(%{"choices" => [_choice], "usage" => value}) when not is_nil(value),
-    do: true
-
-  defp usage_only_event?(_decoded), do: false
-
   defp retain_usage(%{"choices" => [], "usage" => value}, %{usage: nil} = state)
        when not is_nil(value) do
-    put_usage(value, state)
+    put_terminal_usage(value, state)
   end
 
   defp retain_usage(
@@ -139,7 +131,7 @@ defmodule PtcLlmHttp.Codecs.OpenAIStream do
        )
        when not is_nil(value) and is_binary(reason) do
     if empty_repeated_finish?(choice, reason) do
-      put_usage(value, state)
+      put_terminal_usage(value, state)
     else
       {:error, :malformed_stream}
     end
@@ -148,7 +140,14 @@ defmodule PtcLlmHttp.Codecs.OpenAIStream do
   defp retain_usage(%{"usage" => value}, _state) when not is_nil(value),
     do: {:error, :malformed_stream}
 
-  defp retain_usage(_decoded, state), do: {:ok, state}
+  defp retain_usage(_decoded, state), do: {:ok, :event, state}
+
+  defp put_terminal_usage(value, state) do
+    case put_usage(value, state) do
+      {:ok, state} -> {:ok, :usage_only, state}
+      error -> error
+    end
+  end
 
   defp put_usage(value, state) do
     case OpenAI.stream_usage(value) do
