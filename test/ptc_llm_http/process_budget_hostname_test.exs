@@ -1,6 +1,8 @@
 defmodule PtcLlmHttp.ProcessBudgetHostnameTest do
   use ExUnit.Case, async: false
 
+  @probe Path.expand("../../scripts/cold_hostname_budget.exs", __DIR__)
+
   test "the documented hostname budget survives cold and warm resolution in a fresh OS process" do
     {output, status} = run_probe()
 
@@ -15,7 +17,7 @@ defmodule PtcLlmHttp.ProcessBudgetHostnameTest do
 
     System.cmd(
       elixir,
-      ["-e", "PtcLlmHttp.Test.ColdHostnameBudgetProbe.main()"],
+      [@probe],
       env: [{"ERL_LIBS", Path.join(Mix.Project.build_path(), "lib")}],
       stderr_to_stdout: true
     )

@@ -1,14 +1,14 @@
+# Started in a fresh OS/BEAM process so OTP's resolver and platform-trust
+# cache cannot already be warm. Hostname lookup uses the hosts-file name
+# `localhost`; loopback CIDRs are admitted only so the DNS role continues
+# through `:public_key.cacerts_get/0` after resolution. The peer port is
+# closed, so a surviving DNS role fails at connect rather than sending
+# bytes. A second call in the same node covers the warm path. A `:public`
+# target then proves resolution still ends in the documented policy
+# rejection.
+
 defmodule PtcLlmHttp.Test.ColdHostnameBudgetProbe do
   @moduledoc false
-
-  # Started in a fresh OS/BEAM process so OTP's resolver and platform-trust
-  # cache cannot already be warm. Hostname lookup uses the hosts-file name
-  # `localhost`; loopback CIDRs are admitted only so the DNS role continues
-  # through `:public_key.cacerts_get/0` after resolution. The peer port is
-  # closed, so a surviving DNS role fails at connect rather than sending
-  # bytes. A second call in the same node covers the warm path. A `:public`
-  # target then proves resolution still ends in the documented policy
-  # rejection.
 
   alias PtcLlmHttp.{
     Credential,
@@ -103,3 +103,5 @@ defmodule PtcLlmHttp.Test.ColdHostnameBudgetProbe do
 
   defp unused_loopback_port, do: LoopbackPort.unused()
 end
+
+PtcLlmHttp.Test.ColdHostnameBudgetProbe.main()
