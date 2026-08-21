@@ -114,9 +114,9 @@ small by moving *platform* work out, not by dropping coverage.
   gate that failed.
 - `./scripts/install-hooks.sh` — install the tracked Git hooks; run once per
   clone or worktree.
-- `git push` — the pre-push hook runs `scripts/ci/check.sh`. Dialyzer, the
-  compatibility matrix, and the release/package jobs are left to GitHub
-  Actions on purpose: this project exists to keep the per-change loop short.
+- `git push` — the pre-push hook runs `scripts/ci/full_check.sh`, covering every
+  gate meaningful on the local toolchain. GitHub Actions additionally runs the
+  OS and Elixir/OTP compatibility matrix in their declared environments.
 
 The gates are shell scripts in `scripts/ci/`. The Mix aliases, the Git hooks,
 and GitHub Actions all call those same scripts — never add a gate step to a

@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 
-# Deterministic push gate.
+# Complete local push gate.
 #
-# Runs the same repository-owned scripts as GitHub Actions, but only the fast
-# deterministic ones. Dialyzer, the Elixir/OTP compatibility matrix, and the
-# release/package jobs are left to CI on purpose: this project exists to keep
-# a per-change loop short, and a local gate that costs minutes would recreate
-# the problem it was extracted to solve.
-#
-# Run `mix full_check` yourself before tagging a release, and never release on
-# anything but a complete CI result.
+# Runs every gate that is meaningful on the local toolchain before updating a
+# remote branch. GitHub Actions still supplies the separate OS and Elixir/OTP
+# matrix environments that a single workstation cannot reproduce.
 #
 # Bypass with `git push --no-verify` only when pushing documentation you have
 # already gated another way.
@@ -19,4 +14,4 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-exec scripts/ci/check.sh
+exec scripts/ci/full_check.sh
