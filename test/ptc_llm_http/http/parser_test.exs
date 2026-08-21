@@ -5,6 +5,8 @@ defmodule PtcLlmHttp.Http.ParserTest do
   alias PtcLlmHttp.Http.{Parser, Response}
   alias PtcLlmHttp.Test.HttpParserBackend
 
+  import PtcLlmHttp.Test.Fragmentation, only: [fragment: 2]
+
   @backend HttpParserBackend
 
   test "parses a coalesced content-length response without waiting for close" do
@@ -147,18 +149,6 @@ defmodule PtcLlmHttp.Http.ParserTest do
   end
 
   defp fragment_every_byte(binary), do: for(<<byte <- binary>>, do: <<byte>>)
-
-  defp fragment(binary, sizes), do: fragment(binary, sizes, sizes, [])
-  defp fragment(<<>>, _sizes, _original, fragments), do: Enum.reverse(fragments)
-
-  defp fragment(binary, [], original, fragments),
-    do: fragment(binary, original, original, fragments)
-
-  defp fragment(binary, [size | sizes], original, fragments) do
-    take = min(size, byte_size(binary))
-    <<fragment::binary-size(^take), rest::binary>> = binary
-    fragment(rest, sizes, original, [fragment | fragments])
-  end
 
   defp drain_requests(requests) do
     receive do

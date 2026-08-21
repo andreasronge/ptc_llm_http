@@ -40,7 +40,15 @@ defmodule PtcLlmHttp.Transport.SocketBackend do
           | {:transport, atom()}
           | {:tls, atom()}
 
-  @type t :: struct()
+  @typedoc """
+  Backend state: a struct carrying its socket and the bytes a capped read left
+  behind.
+
+  `:leftover` is part of this contract rather than an implementation detail.
+  `deliver/3` and `deliver_carried/3` maintain it on the backend's behalf, so a
+  struct without the field does not satisfy the behaviour.
+  """
+  @type t :: %{:__struct__ => module(), :leftover => binary(), optional(atom()) => term()}
 
   @callback connect(spec :: map(), deadline()) :: {:ok, t()} | {:error, reason()}
   @callback send(t(), iodata(), deadline()) :: :ok | {:error, reason()}
@@ -83,6 +91,42 @@ defmodule PtcLlmHttp.Transport.SocketBackend do
     case data do
       <<chunk::binary-size(^max), rest::binary>> -> {chunk, rest}
       _within_cap -> {data, <<>>}
+    end
+  end
+
+  @doc """
+  Splits `data` into what this call returns and what the socket carries.
+
+  A remainder is normal on TLS and rare on TCP, and the split is the same
+  either way. `:ssl` will not hand back a fraction of a record, so a TLS caller
+  asking for less than a record always leaves one; the TCP backend re-sets
+  `buffer` per read, so it leaves one only when a cap shrank mid-stream and the
+  driver had already buffered more. Carrying the remainder here rather than in
+  each backend is what makes "unread bytes survive, in order and exactly once"
+  one rule with one implementation instead of a promise each backend keeps on
+  its own.
+
+  The struct is updated generically because the field, not the struct, is the
+  contract: any backend state with a `:leftover` binary satisfies it.
+  """
+  @spec deliver(t(), binary(), pos_integer()) :: {:ok, binary(), t()}
+  def deliver(state, data, max) do
+    {chunk, leftover} = split(data, max)
+    {:ok, chunk, %{state | leftover: leftover}}
+  end
+
+  @doc """
+  Serves a read entirely from carried bytes, without touching the socket.
+
+  The deadline is still checked: a caller past its deadline gets `:timeout`
+  whether or not the answer happened to be in hand already, so a stream that
+  has run out of time cannot keep draining a buffer.
+  """
+  @spec deliver_carried(t(), pos_integer(), deadline()) ::
+          {:ok, binary(), t()} | {:error, :timeout}
+  def deliver_carried(%{leftover: leftover} = state, max, deadline) do
+    with {:ok, _timeout} <- remaining(deadline) do
+      deliver(%{state | leftover: <<>>}, leftover, max)
     end
   end
 

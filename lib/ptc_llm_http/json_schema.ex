@@ -8,6 +8,7 @@ defmodule PtcLlmHttp.JsonSchema do
   @common_keys ~w(type description enum)
   @object_keys ~w(properties required additionalProperties)
   @array_keys ~w(items)
+  @known_keys @common_keys ++ @object_keys ++ @array_keys
   @maximum_schema_depth Limits.schema_depth()
   @maximum_json_depth Limits.json_depth()
   @maximum_nodes Limits.json_nodes()
@@ -105,22 +106,23 @@ defmodule PtcLlmHttp.JsonSchema do
   defp normalize_known_keys(schema) do
     Enum.reduce_while(schema, {:ok, %{}}, fn
       {key, value}, {:ok, normalized} when is_binary(key) ->
-        if key in (@common_keys ++ @object_keys ++ @array_keys) and
-             not Map.has_key?(normalized, key),
-           do: {:cont, {:ok, Map.put(normalized, key, value)}},
-           else: {:halt, :error}
+        put_known_key(normalized, key, value)
 
       {key, value}, {:ok, normalized} when is_atom(key) ->
-        string_key = Atom.to_string(key)
-
-        if string_key in (@common_keys ++ @object_keys ++ @array_keys) and
-             not Map.has_key?(normalized, string_key),
-           do: {:cont, {:ok, Map.put(normalized, string_key, value)}},
-           else: {:halt, :error}
+        put_known_key(normalized, Atom.to_string(key), value)
 
       _entry, _acc ->
         {:halt, :error}
     end)
+  end
+
+  # A schema may name a key as a string or as an atom, but never twice: the
+  # two spellings share one slot, so the second one to arrive is a conflict
+  # rather than an overwrite.
+  defp put_known_key(normalized, key, value) do
+    if key in @known_keys and not Map.has_key?(normalized, key),
+      do: {:cont, {:ok, Map.put(normalized, key, value)}},
+      else: {:halt, :error}
   end
 
   defp fetch_type(%{"type" => type}) when type in @types, do: {:ok, type}

@@ -2,10 +2,10 @@ defmodule PtcLlmHttp.Http.Parser do
   @moduledoc false
 
   alias PtcLlmHttp.Http.Response
+  alias PtcLlmHttp.Http.Token
   alias PtcLlmHttp.Limits
   alias PtcLlmHttp.Transport.SocketBackend
 
-  @token_special ~c"!#$%&'*+-.^_`|~"
   @maximum_header_fields Limits.response_header_fields()
   @maximum_trailer_fields Limits.trailer_fields()
   @allowed_trailers ["content-digest"]
@@ -363,7 +363,7 @@ defmodule PtcLlmHttp.Http.Parser do
         value = trim_ows(raw_value)
 
         if byte_size(name) <= Limits.header_name_bytes() and
-             byte_size(value) <= Limits.header_value_bytes() and token?(name) and
+             byte_size(value) <= Limits.header_value_bytes() and Token.token?(name) and
              field_value?(value) do
           {:ok, ascii_downcase(name), value}
         else
@@ -373,12 +373,6 @@ defmodule PtcLlmHttp.Http.Parser do
       _missing_or_empty ->
         {:error, :malformed_http}
     end
-  end
-
-  defp token?(value) do
-    Enum.all?(:binary.bin_to_list(value), fn byte ->
-      byte in ?A..?Z or byte in ?a..?z or byte in ?0..?9 or byte in @token_special
-    end)
   end
 
   defp field_value?(value) do
@@ -762,7 +756,7 @@ defmodule PtcLlmHttp.Http.Parser do
   defp take_token(value), do: take_token(value, 0)
 
   defp take_token(<<byte, rest::binary>>, count) when count >= 0 do
-    if token_byte?(byte),
+    if Token.byte?(byte),
       do: take_token(rest, count + 1),
       else: token_result(value(byte, rest), count)
   end
@@ -773,9 +767,6 @@ defmodule PtcLlmHttp.Http.Parser do
   defp token_result(rest, _count), do: {:ok, rest}
 
   defp value(byte, rest), do: <<byte, rest::binary>>
-
-  defp token_byte?(byte),
-    do: byte in ?A..?Z or byte in ?a..?z or byte in ?0..?9 or byte in @token_special
 
   defp optional_extension_value(<<"=", rest::binary>>),
     do: extension_value(trim_left_ows(rest))
