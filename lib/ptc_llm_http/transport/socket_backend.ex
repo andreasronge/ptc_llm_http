@@ -87,6 +87,39 @@ defmodule PtcLlmHttp.Transport.SocketBackend do
   end
 
   @doc """
+  Splits `data` into what this call returns and what the socket carries.
+
+  Both backends read whole arrival units -- a driver buffer, a TLS record --
+  and neither can ask for less than one, so a read capped below what arrived
+  always leaves a remainder. Carrying it here rather than in each backend is
+  what makes "unread bytes survive, in order and exactly once" one rule with
+  one implementation instead of a promise each backend keeps on its own.
+
+  The struct is updated generically because the field, not the struct, is the
+  contract: any backend state with a `:leftover` binary satisfies it.
+  """
+  @spec deliver(t(), binary(), pos_integer()) :: {:ok, binary(), t()}
+  def deliver(state, data, max) do
+    {chunk, leftover} = split(data, max)
+    {:ok, chunk, %{state | leftover: leftover}}
+  end
+
+  @doc """
+  Serves a read entirely from carried bytes, without touching the socket.
+
+  The deadline is still checked: a caller past its deadline gets `:timeout`
+  whether or not the answer happened to be in hand already, so a stream that
+  has run out of time cannot keep draining a buffer.
+  """
+  @spec deliver_carried(t(), pos_integer(), deadline()) ::
+          {:ok, binary(), t()} | {:error, :timeout}
+  def deliver_carried(%{leftover: leftover} = state, max, deadline) do
+    with {:ok, _timeout} <- remaining(deadline) do
+      deliver(%{state | leftover: <<>>}, leftover, max)
+    end
+  end
+
+  @doc """
   Maps an OTP socket error onto the closed `t:reason/0` set.
 
   Anything unrecognized becomes `{:transport, :unknown}` rather than travelling

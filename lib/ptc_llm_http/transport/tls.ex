@@ -134,19 +134,16 @@ defmodule PtcLlmHttp.Transport.Tls do
     with {:ok, timeout} <- SocketBackend.remaining(deadline) do
       guard(fn ->
         case :ssl.recv(state.socket, 0, timeout) do
-          {:ok, data} -> deliver(state, data, max)
+          {:ok, data} -> SocketBackend.deliver(state, data, max)
           {:error, reason} -> {:error, SocketBackend.classify(reason)}
         end
       end)
     end
   end
 
-  def recv_up_to(%__MODULE__{leftover: leftover} = state, max, deadline)
-      when is_integer(max) and max > 0 do
-    with {:ok, _timeout} <- SocketBackend.remaining(deadline) do
-      deliver(%__MODULE__{state | leftover: <<>>}, leftover, max)
-    end
-  end
+  def recv_up_to(%__MODULE__{} = state, max, deadline)
+      when is_integer(max) and max > 0,
+      do: SocketBackend.deliver_carried(state, max, deadline)
 
   @impl SocketBackend
   def close(%__MODULE__{} = state) do
@@ -161,11 +158,6 @@ defmodule PtcLlmHttp.Transport.Tls do
     # both is what makes cleanup safe to run on every exit path.
     guard(fn -> :ssl.close(state.socket, 0) end)
     :ok
-  end
-
-  defp deliver(%__MODULE__{} = state, data, max) do
-    {chunk, leftover} = SocketBackend.split(data, max)
-    {:ok, chunk, %__MODULE__{state | leftover: leftover}}
   end
 
   defp options(hostname, cacerts) do

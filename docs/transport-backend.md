@@ -71,6 +71,14 @@ one memory profile, and the TCP backend narrows it further when the caller asks
 for less. A TLS caller that asks for less than a record gets exactly what it
 asked for, and the backend holds the rest — at most 16 KiB.
 
+Holding the rest is one rule, not two. `PtcLlmHttp.Transport.SocketBackend`
+owns the carry for both backends: it performs the split, stores the remainder
+on the backend's `:leftover` field, and serves the next read from that field
+without touching the socket. A backend supplies the field and the socket call;
+it does not get to decide what "in order and exactly once" means. The deadline
+is still checked on a carried read, so a caller past its deadline gets
+`:timeout` even when the answer was already in hand.
+
 ### Flow control
 
 | Case | Result |

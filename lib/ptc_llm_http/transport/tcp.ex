@@ -73,26 +73,18 @@ defmodule PtcLlmHttp.Transport.Tcp do
       state = resize(state, min(max, SocketBackend.max_chunk()))
 
       case :gen_tcp.recv(state.socket, 0, timeout) do
-        {:ok, data} -> deliver(state, data, max)
+        {:ok, data} -> SocketBackend.deliver(state, data, max)
         {:error, reason} -> {:error, SocketBackend.classify(reason)}
       end
     end
   end
 
-  def recv_up_to(%__MODULE__{leftover: leftover} = state, max, deadline)
-      when is_integer(max) and max > 0 do
-    with {:ok, _timeout} <- SocketBackend.remaining(deadline) do
-      deliver(%__MODULE__{state | leftover: <<>>}, leftover, max)
-    end
-  end
+  def recv_up_to(%__MODULE__{} = state, max, deadline)
+      when is_integer(max) and max > 0,
+      do: SocketBackend.deliver_carried(state, max, deadline)
 
   @impl SocketBackend
   def close(%__MODULE__{} = state), do: :gen_tcp.close(state.socket)
-
-  defp deliver(%__MODULE__{} = state, data, max) do
-    {chunk, leftover} = SocketBackend.split(data, max)
-    {:ok, chunk, %__MODULE__{state | leftover: leftover}}
-  end
 
   defp resize(%__MODULE__{chunk: chunk} = state, chunk), do: state
 
