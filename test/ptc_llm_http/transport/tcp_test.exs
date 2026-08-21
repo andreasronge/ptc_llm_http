@@ -56,12 +56,7 @@ defmodule PtcLlmHttp.Transport.TcpTest do
   end
 
   test "classifies a refused connection" do
-    server = start_peer()
-    port = RawServer.port(server)
-    :ok = stop_supervised!(RawServer)
-
-    assert {:error, {:transport, :econnrefused}} =
-             Tcp.connect(%{address: {127, 0, 0, 1}, port: port}, deadline(5_000))
+    assert {:error, {:transport, :econnrefused}} = refused_loopback_connect()
   end
 
   test "inspection reveals nothing about the connection" do
@@ -69,5 +64,23 @@ defmodule PtcLlmHttp.Transport.TcpTest do
 
     assert inspect(socket) == "#PtcLlmHttp.Transport.Tcp<redacted>"
     refute inspect(socket) =~ "socket"
+  end
+
+  defp refused_loopback_connect(attempts \\ 8)
+  defp refused_loopback_connect(0), do: {:error, :gave_up}
+
+  defp refused_loopback_connect(attempts) do
+    server = start_peer()
+    port = RawServer.port(server)
+    :ok = stop_supervised!(RawServer)
+
+    case Tcp.connect(%{address: {127, 0, 0, 1}, port: port}, deadline(5_000)) do
+      {:error, {:transport, :econnrefused}} = refused ->
+        refused
+
+      {:ok, socket} ->
+        :ok = Tcp.close(socket)
+        refused_loopback_connect(attempts - 1)
+    end
   end
 end

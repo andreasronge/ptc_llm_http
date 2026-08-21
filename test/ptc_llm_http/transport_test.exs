@@ -3,7 +3,7 @@ defmodule PtcLlmHttp.TransportTest do
 
   alias PtcLlmHttp.{Credential, Deadline, Error, ProcessBudget, Runtime, Target, Transport}
   alias PtcLlmHttp.Http.{Request, Response}
-  alias PtcLlmHttp.Test.{Certificates, RawServer}
+  alias PtcLlmHttp.Test.{Certificates, LoopbackPort, RawServer}
 
   import PtcLlmHttp.Test.Fragmentation, only: [fragment: 2]
 
@@ -365,10 +365,5 @@ defmodule PtcLlmHttp.TransportTest do
     deadline
   end
 
-  defp unused_loopback_port do
-    {:ok, socket} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false])
-    {:ok, {_address, port}} = :inet.sockname(socket)
-    :ok = :gen_tcp.close(socket)
-    port
-  end
+  defp unused_loopback_port, do: LoopbackPort.unused()
 end
