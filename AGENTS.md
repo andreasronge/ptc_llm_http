@@ -158,9 +158,10 @@ compile / lint / test / release-gate work plus exercising the public API in
 and in the README — use those; nothing below repeats them.
 
 - **Toolchain is mise-managed** (Erlang/OTP and Elixir pinned in `mise.toml`,
- currently OTP 29.0.3 / Elixir 1.20.2-otp-29). The startup update script runs
- `mise install` followed by `mix deps.get`; you do not need to install the
- toolchain yourself.
+ currently OTP 29.0.3 / Elixir 1.20.2-otp-29). The Cloud Agent install script
+ bootstraps `mise` via `https://mise.run` when `$HOME/.local/bin/mise` is
+ missing, then runs `mise install` and `mix deps.get`. You do not need to
+ install the toolchain yourself on a fresh agent.
 - **`mise` is only on `PATH` in interactive shells** (activated via `~/.bashrc`).
  Non-interactive shells — including the agent's own command tool — do **not**
  inherit it. Prefix commands with `~/.local/bin/mise exec --`
