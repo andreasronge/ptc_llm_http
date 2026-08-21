@@ -14,8 +14,16 @@ defmodule PtcLlmHttp.Http.Token do
 
   @special ~c"!#$%&'*+-.^_`|~"
 
-  @doc "Whether every byte of `value` is a token character."
+  @doc """
+  Whether `value` is a token: one or more token characters and nothing else.
+
+  The empty string is not a token. The production is `1*tchar`, and a caller
+  that reaches for the rule by name should get the rule, not a spelling of it
+  that leans on the caller to reject `""` separately.
+  """
   @spec token?(binary()) :: boolean()
+  def token?(<<>>), do: false
+
   def token?(value) when is_binary(value) do
     Enum.all?(:binary.bin_to_list(value), &byte?/1)
   end

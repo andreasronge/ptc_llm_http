@@ -40,7 +40,15 @@ defmodule PtcLlmHttp.Transport.SocketBackend do
           | {:transport, atom()}
           | {:tls, atom()}
 
-  @type t :: struct()
+  @typedoc """
+  Backend state: a struct carrying its socket and the bytes a capped read left
+  behind.
+
+  `:leftover` is part of this contract rather than an implementation detail.
+  `deliver/3` and `deliver_carried/3` maintain it on the backend's behalf, so a
+  struct without the field does not satisfy the behaviour.
+  """
+  @type t :: %{:__struct__ => module(), :leftover => binary(), optional(atom()) => term()}
 
   @callback connect(spec :: map(), deadline()) :: {:ok, t()} | {:error, reason()}
   @callback send(t(), iodata(), deadline()) :: :ok | {:error, reason()}
@@ -89,11 +97,14 @@ defmodule PtcLlmHttp.Transport.SocketBackend do
   @doc """
   Splits `data` into what this call returns and what the socket carries.
 
-  Both backends read whole arrival units -- a driver buffer, a TLS record --
-  and neither can ask for less than one, so a read capped below what arrived
-  always leaves a remainder. Carrying it here rather than in each backend is
-  what makes "unread bytes survive, in order and exactly once" one rule with
-  one implementation instead of a promise each backend keeps on its own.
+  A remainder is normal on TLS and rare on TCP, and the split is the same
+  either way. `:ssl` will not hand back a fraction of a record, so a TLS caller
+  asking for less than a record always leaves one; the TCP backend re-sets
+  `buffer` per read, so it leaves one only when a cap shrank mid-stream and the
+  driver had already buffered more. Carrying the remainder here rather than in
+  each backend is what makes "unread bytes survive, in order and exactly once"
+  one rule with one implementation instead of a promise each backend keeps on
+  its own.
 
   The struct is updated generically because the field, not the struct, is the
   contract: any backend state with a `:leftover` binary satisfies it.
