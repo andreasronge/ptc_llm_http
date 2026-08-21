@@ -227,7 +227,8 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
     case update_progress(state, :dns, :not_sent) do
       {:ok, state} ->
         operation_ref = make_ref()
-        role_operation = fn -> {:ok, {:http_dns, Transport.resolve(operation)}} end
+        io_operation = Map.delete(operation, :decoder)
+        role_operation = fn -> {:ok, {:http_dns, Transport.resolve(io_operation)}} end
         Role.run(binding.roles.dns, self(), operation_ref, role_operation)
 
         {:noreply,
@@ -279,13 +280,14 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
     coordinator = self()
     operation_ref = state.operation_ref
     deadline = binding.deadline
+    io_operation = Map.delete(operation, :decoder)
 
     progress = fn phase, dispatch ->
       transport_progress(coordinator, operation_ref, deadline, phase, dispatch)
     end
 
     role_operation = fn ->
-      {:ok, {:http_exchange, Transport.exchange(operation, connection_spec, progress)}}
+      {:ok, {:http_exchange, Transport.exchange(io_operation, connection_spec, progress)}}
     end
 
     Role.run(binding.roles.socket, self(), operation_ref, role_operation)

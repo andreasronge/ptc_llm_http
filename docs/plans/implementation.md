@@ -5,9 +5,9 @@
 `bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
 the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
 is OTP 26, and the trust source is OTP's in-memory platform store. Slices 2
-through 4 added the validated call contracts, fail-stop admission runtime,
-bounded HTTP/1 core, and independently usable OpenAI-compatible text calls.
-Tools and structured output remain for Slice 5.
+through 5 added the validated call contracts, fail-stop admission runtime,
+bounded HTTP/1 core, and independently usable OpenAI-compatible text, tool, and
+strict structured-output calls. Streaming remains for Slice 6.
 
 ## Goal
 
@@ -477,8 +477,49 @@ bounded to the signed 64-bit range before encoding. Temperature is numeric in
 the closed interval from zero through two. These local numeric ceilings keep
 JSON sizing bounded independently of provider behavior.
 
-The completed request constructor through Slice 5 accepts a provider-neutral
-request containing:
+The completed request constructor through Slice 5 adds this exact surface:
+
+```elixir
+{:ok, request} =
+  PtcLlmHttp.Request.new(
+    messages: [
+      %{role: :user, content: "Use the tool"},
+      %{
+        role: :assistant,
+        content: nil,
+        tool_calls: [%{id: "call_1", name: "weather", args: %{"city" => "Stockholm"}}]
+      },
+      %{role: :tool, tool_call_id: "call_1", content: "12 C"}
+    ],
+    tools: [
+      %{
+        name: "weather",
+        description: "Look up weather",
+        parameters: %{
+          "type" => "object",
+          "properties" => %{"city" => %{"type" => "string"}},
+          "required" => ["city"],
+          "additionalProperties" => false
+        }
+      }
+    ],
+    response_schema: %{
+      name: "weather_result",
+      schema: %{
+        "type" => "object",
+        "properties" => %{"summary" => %{"type" => "string"}},
+        "required" => ["summary"],
+        "additionalProperties" => false
+      }
+    }
+  )
+```
+
+`tools` defaults to `[]` and `response_schema` defaults to `nil`.
+`response_schema: :json_object` selects the older JSON-object mode only when
+the target declares that mode. A schema map selects strict JSON Schema mode.
+Together with the Slice 4 fields, the constructor represents a
+provider-neutral request containing:
 
 - optional system text;
 - ordered messages with roles `system`, `user`, `assistant`, and `tool`;
@@ -594,7 +635,9 @@ direct call without one of those owners is not retained.
 A successful non-stream `%Response{}` contains only normalized data:
 
 - content string, which may be empty;
-- zero or more normalized tool calls `%{id:, name:, args:}`;
+- zero or more normalized redacted `%PtcLlmHttp.ToolCall{}` values whose
+  explicit `id/1`, `name/1`, and `arguments/1` accessors return the bounded
+  provider ID, declared name, and decoded argument object;
 - provider-reported usage fields; and
 - bounded numeric transport metadata such as status, encoded request bytes,
   response bytes, and phase durations.
@@ -604,11 +647,12 @@ Response, tool-call, usage, and stream-chunk values are opaque or have redacted
 access is explicit because those values may be private even after successful
 normalization.
 
-For non-streaming text, the explicit accessors are `Response.content/1`,
-`Response.usage/1`, `Response.metadata/1`, and `Usage.facts/1`. Metadata contains
-only status, encoded JSON request bytes, identity response-body bytes,
-informational-response count, and trailer-field count. It contains no endpoint,
-model, headers, prompt, output, provider message, or raw error data.
+For non-streaming calls, the explicit accessors are `Response.content/1`,
+`Response.tool_calls/1`, `Response.usage/1`, `Response.metadata/1`, the three
+`ToolCall` accessors above, and `Usage.facts/1`. Metadata contains only status,
+encoded JSON request bytes, identity response-body bytes, informational-response
+count, and trailer-field count. It contains no endpoint, model, headers, prompt,
+output, provider message, or raw error data.
 
 The package never calculates price. A cost value is present only when the
 response reports it and the codec has an exact documented field mapping.
@@ -636,7 +680,7 @@ failures return `%PtcLlmHttp.Error{}`. The closed initial `kind` enum is:
 :tls_failure | :connection_closed | :malformed_http | :response_too_large |
 :unsupported_redirect | :unsupported_content_encoding |
 :unsupported_transfer_encoding | :unsupported_framing | :http_status |
-:malformed_provider_response | :provider_result_too_large |
+:malformed_provider_response | :provider_result_too_large | :model_refusal |
 :malformed_stream | :stream_too_large | :invalid_tool_arguments
 ```
 
@@ -649,8 +693,9 @@ Provider error codes exposed publicly are atoms from a closed, codec/version-
 specific enum or `nil`; unknown raw codes are discarded and take the default
 status mapping. No arbitrary string or open-ended scope crosses the boundary.
 
-Slice 2 published the non-wire entries as `error-base-v1`; Slice 4 completes
-the HTTP/OpenAI-compatible entries as `error-openai-v1`.
+Slice 2 published the non-wire entries as `error-base-v1`; Slice 4 completed
+the initial HTTP/OpenAI-compatible entries as `error-openai-v1`. Slice 5 adds
+the model-scoped structured-output refusal entry as `error-openai-v2`.
 `PtcLlmHttp.Error.contract/0` returns that version plus a bounded sorted list of
 disjoint contract entries. Each entry has a stable ID and enumerates its exact
 kind, allowed phases, HTTP status list/ranges, provider-code atoms, scopes, and
@@ -713,7 +758,10 @@ approved.
 | Socket read quantum | 16,384 bytes |
 | SSE event / event count | 262,144 bytes / 10,000 |
 | Messages / declared tools / returned tool calls | 1,024 / 128 / 128 |
-| Tool name / tool-call ID | 128 / 256 bytes |
+| Tool name / tool-call ID | 64 / 256 bytes |
+| Tool description / one and cumulative returned argument JSON | 16,384 / 262,144 bytes |
+| Structured-output name / schema property name / enum values | 64 bytes / 128 bytes / 128 per enum |
+| Aggregate schema properties / nesting / strings / enum values | 5,000 / 10 / 120,000 characters / 1,000 |
 | JSON nesting / visited containers and scalar values | 64 / 100,000 |
 | DNS addresses retained from one resolution | 8 |
 | Explicit connect-policy CIDRs | 32 |
@@ -1066,6 +1114,19 @@ response mismatches are closed errors. The normalized response retains
 canonical JSON text for compatibility, but that text is produced only from the
 already bounded and validated object; the PtcRunner adapter does not parse raw
 provider JSON or perform a second schema interpretation.
+
+The V1 admitted dialect is a strict subset of JSON Schema Draft 2020-12. Every
+schema node requires one string `type`. Supported types are `object`, `array`,
+`string`, `number`, `integer`, `boolean`, and `null`; supported optional
+keywords are `description` and a bounded scalar `enum`. Objects require
+`properties`, require every declared property exactly once through `required`,
+and require `additionalProperties: false`. Arrays require one `items` schema.
+All other keywords, boolean schemas, union types, references, composition,
+formats, patterns, cardinality constraints, and tuple arrays are rejected
+before admission. Tool parameters and structured output use this same dialect.
+Structured output requires an object root. Returned values are checked against
+the exact normalized schema, including recursively rejecting missing or
+additional object members.
 
 ### Cache policy
 
@@ -1454,15 +1515,22 @@ Exit met in this package: text calls are independently releasable. PtcRunner
 cutover remains a pinned integration checkpoint and is intentionally not
 performed from this repository.
 
-### Slice 5 — tools and structured output
+### Slice 5 — tools and structured output — complete
 
-- Implement tool definitions, assistant/tool messages, parallel tool calls,
-  bounded argument decoding, the admitted JSON Schema dialect, and response
-  validation for declared structured-output modes.
-- Add all closed malformed/null/oversized outcomes.
-- Run PtcRunner tool-loop and schema parity fixtures.
+- Added exact strict function definitions, assistant tool-call replay, ordered
+  tool results, parallel returned calls, bounded decoded argument objects, and
+  redacted tool-call values.
+- Added strict JSON Schema and JSON-object request translation, response object
+  validation, and deterministic canonical JSON output.
+- Added exact local wire fixtures and malformed/null/scalar/schema-mismatch/
+  overflow coverage. PtcRunner parity remains a pinned consumer checkpoint and
+  is intentionally not performed from this repository.
+- Verification on 2026-08-21: `mix check` completed in 18.38 seconds; the full
+  compatibility, audit, minimum-runtime, Dialyzer, docs, release-smoke, and
+  package gate (`mix full_check`) completed in 97.58 seconds.
 
-Exit: non-streaming Kernel capability parity for supported targets.
+Exit met in this package: non-streaming tool and structured-output capability
+is independently releasable for supported targets.
 
 ### Slice 6 — streaming
 

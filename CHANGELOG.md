@@ -11,6 +11,14 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- Strict OpenAI-compatible function tools, assistant/tool replay messages,
+  parallel returned tool calls with bounded schema-validated arguments, and
+  redacted tool-call accessors.
+- Strict JSON Schema and JSON-object response formats with pre-admission target
+  capability checks, a closed bounded schema dialect, exact local fixtures,
+  recursive response validation, and canonical JSON output.
+- The `error-openai-v2` contract, adding a model-scoped structured-output
+  refusal outcome without retaining provider refusal text.
 - Public bounded OpenAI-compatible non-streaming text calls with validated and
   redacted requests, deterministic `/chat/completions` encoding, response and
   usage accessors, bounded codec-role JSON decoding, exact local wire fixtures,

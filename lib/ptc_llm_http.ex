@@ -32,8 +32,8 @@ defmodule PtcLlmHttp do
 
   ## Status
 
-  Pre-alpha. Bounded OpenAI-compatible text calls are available; tools,
-  structured output, and streaming land in later slices.
+  Pre-alpha. Bounded OpenAI-compatible text, tool, and structured-output calls
+  are available; streaming lands in a later slice.
   """
 
   alias PtcLlmHttp.Codecs.OpenAI
@@ -50,7 +50,7 @@ defmodule PtcLlmHttp do
   }
 
   @doc """
-  Performs one bounded non-streaming OpenAI-compatible text attempt.
+  Performs one bounded non-streaming OpenAI-compatible attempt.
 
   The options are exact and required: a call-local credential, one absolute
   deadline, and one aggregate attempt process budget. The function never
@@ -62,7 +62,11 @@ defmodule PtcLlmHttp do
     with {:ok, credential, deadline, budget} <- call_options(options),
          {:ok, _remaining} <- Deadline.remaining(deadline),
          {:ok, body} <- OpenAI.encode(target, request) do
-      decoder = fn response -> OpenAI.decode(target, byte_size(body), response) end
+      decode_context = OpenAI.decode_context(request)
+
+      decoder = fn response ->
+        OpenAI.decode(target, decode_context, byte_size(body), response)
+      end
 
       Transport.request(
         runtime,

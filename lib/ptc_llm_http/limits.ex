@@ -21,6 +21,19 @@ defmodule PtcLlmHttp.Limits do
   @trailer_bytes 16_384
   @trailer_fields 64
   @messages 1_024
+  @tools 128
+  @tool_calls 128
+  @tool_name_bytes 64
+  @tool_call_id_bytes 256
+  @tool_description_bytes 16_384
+  @tool_argument_bytes 262_144
+  @schema_name_bytes 64
+  @schema_property_bytes 128
+  @schema_enum_values 128
+  @schema_properties 5_000
+  @schema_depth 10
+  @schema_string_characters 120_000
+  @schema_total_enum_values 1_000
   @integer_parameter_min -9_223_372_036_854_775_808
   @integer_parameter_max 9_223_372_036_854_775_807
   @json_depth 64
@@ -53,6 +66,19 @@ defmodule PtcLlmHttp.Limits do
   def trailer_bytes, do: @trailer_bytes
   def trailer_fields, do: @trailer_fields
   def messages, do: @messages
+  def tools, do: @tools
+  def tool_calls, do: @tool_calls
+  def tool_name_bytes, do: @tool_name_bytes
+  def tool_call_id_bytes, do: @tool_call_id_bytes
+  def tool_description_bytes, do: @tool_description_bytes
+  def tool_argument_bytes, do: @tool_argument_bytes
+  def schema_name_bytes, do: @schema_name_bytes
+  def schema_property_bytes, do: @schema_property_bytes
+  def schema_enum_values, do: @schema_enum_values
+  def schema_properties, do: @schema_properties
+  def schema_depth, do: @schema_depth
+  def schema_string_characters, do: @schema_string_characters
+  def schema_total_enum_values, do: @schema_total_enum_values
   def integer_parameter_min, do: @integer_parameter_min
   def integer_parameter_max, do: @integer_parameter_max
   def json_depth, do: @json_depth
