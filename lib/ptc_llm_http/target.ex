@@ -296,7 +296,7 @@ defmodule PtcLlmHttp.Target do
 
     if is_boolean(Keyword.fetch!(options, :tools)) and
          is_boolean(Keyword.fetch!(options, :streaming)) and
-         Keyword.fetch!(options, :structured_output) in [:unsupported, :json_schema] and
+         Keyword.fetch!(options, :structured_output) in [:unsupported, :json_schema, :json_object] and
          Keyword.fetch!(options, :cache_mode) in [:unsupported, :explicit] and
          Keyword.fetch!(options, :upstream_routing) in [:opaque, :single_provider] and
          is_map(usage) and map_size(usage) == 2 and is_boolean(usage[:tokens]) and

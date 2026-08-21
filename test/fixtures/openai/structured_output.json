@@ -1,0 +1,1 @@
+{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"temperature\":12,\"city\":\"Stockholm\"}"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}

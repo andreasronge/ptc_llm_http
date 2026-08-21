@@ -2,10 +2,10 @@
 
 # Per-commit gate. Target: comfortably under a minute warm.
 #
-# Deliberately absent: Dialyzer, the Elixir/OTP compatibility matrix, release
-# assembly, package verification, and the docs build. Those are platform and
-# release work, not correctness coverage -- see full_check.sh. Do not buy speed
-# here by lowering property counts or skipping tests.
+# Deliberately absent: Dialyzer, release assembly, package verification, and
+# the docs build. Those are release work, not correctness coverage -- see
+# full_check.sh. Do not buy speed here by lowering property counts or skipping
+# tests.
 
 set -euo pipefail
 

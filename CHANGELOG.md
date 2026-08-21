@@ -11,6 +11,14 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- Strict OpenAI-compatible function tools, assistant/tool replay messages,
+  parallel returned tool calls with bounded schema-validated arguments, and
+  redacted tool-call accessors.
+- Strict JSON Schema and JSON-object response formats with pre-admission target
+  capability checks, a closed bounded schema dialect, exact local fixtures,
+  recursive response validation, and canonical JSON output.
+- The `error-openai-v2` contract, adding a model-scoped structured-output
+  refusal outcome without retaining provider refusal text.
 - Public bounded OpenAI-compatible non-streaming text calls with validated and
   redacted requests, deterministic `/chat/completions` encoding, response and
   usage accessors, bounded codec-role JSON decoding, exact local wire fixtures,
@@ -48,15 +56,15 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   StreamData, and usage-rules tooling.
 - Repository-owned gates `mix check` and `mix full_check`, implemented as
   scripts under `scripts/ci/` and shared by the Git hooks and GitHub Actions.
-- GitHub Actions workflow: quality, tests on Linux and macOS, minimum
-  Elixir/OTP compatibility, Dialyzer, docs, and release/package verification.
+- GitHub Actions workflow: quality, tests on Linux and macOS, Dialyzer, docs,
+  and release/package verification on the supported toolchain.
 - The reserved public namespace `PtcLlmHttp` and its OTP application.
 
 ### Changed
 
-- Erlang/OTP 26 is now the declared and enforced minimum, established by the
-  socket/TLS spike rather than assumed. The compatibility job runs the whole
-  suite on it.
+- Elixir 1.20 and Erlang/OTP 29 are now the declared and enforced minimums,
+  matching the only consumer and the development/CI baseline. Earlier OTP
+  releases remain transport-spike evidence but are not supported runtimes.
 
 ### Fixed
 

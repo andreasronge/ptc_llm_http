@@ -87,7 +87,6 @@ named gate that runs it:
 
 | Tag | Meaning | Gate |
 | --- | --- | --- |
-| `:compat` | Requires a non-default Elixir/OTP pair | `compat` job, `mix full_check` |
 | `:release` | Requires an assembled release or built package | `release-package` job, `mix full_check` |
 | `:soak` | Long-running resource/leak trend suite | `mix soak` |
 
@@ -102,8 +101,8 @@ small by moving *platform* work out, not by dropping coverage.
 - `mix check` — per-commit gate: lock check, format, compile with warnings as
   errors, compile-cycle check, Credo, and the test suite. Target: comfortably
   under a minute warm. Run before every commit.
-- `mix full_check` — everything in `mix check`, plus the `:compat`/`:release`
-  tests, dependency audit, the runtime-dependency check
+- `mix full_check` — everything in `mix check`, plus the `:release` tests,
+  dependency audit, the runtime-dependency check
   (`scripts/ci/minimum-elixir.sh`: the library must compile with only its
   runtime dependencies fetched), Dialyzer, docs with warnings as errors, the
   minimal release smoke, and package-contents verification. Run before a
@@ -115,8 +114,8 @@ small by moving *platform* work out, not by dropping coverage.
 - `./scripts/install-hooks.sh` — install the tracked Git hooks; run once per
   clone or worktree.
 - `git push` — the pre-push hook runs `scripts/ci/full_check.sh`, covering every
-  gate meaningful on the local toolchain. GitHub Actions additionally runs the
-  OS and Elixir/OTP compatibility matrix in their declared environments.
+  gate meaningful on the supported Elixir 1.20 / OTP 29 toolchain. GitHub
+  Actions additionally runs the OS matrix.
 
 The gates are shell scripts in `scripts/ci/`. The Mix aliases, the Git hooks,
 and GitHub Actions all call those same scripts — never add a gate step to a

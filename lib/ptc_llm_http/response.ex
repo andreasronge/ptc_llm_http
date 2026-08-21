@@ -6,14 +6,14 @@ defmodule PtcLlmHttp.Response do
   never exposes model output or provider facts.
   """
 
-  alias PtcLlmHttp.Usage
+  alias PtcLlmHttp.{ToolCall, Usage}
 
   @enforce_keys [:content, :tool_calls, :usage, :metadata]
   defstruct @enforce_keys
 
   @opaque t :: %__MODULE__{
             content: binary(),
-            tool_calls: [],
+            tool_calls: [ToolCall.t()],
             usage: Usage.t() | nil,
             metadata: map()
           }
@@ -21,6 +21,10 @@ defmodule PtcLlmHttp.Response do
   @doc "Returns the normalized assistant text."
   @spec content(t()) :: binary()
   def content(%__MODULE__{content: content}), do: content
+
+  @doc "Returns normalized function-tool calls in provider order."
+  @spec tool_calls(t()) :: [ToolCall.t()]
+  def tool_calls(%__MODULE__{tool_calls: tool_calls}), do: tool_calls
 
   @doc "Returns provider-reported usage, or `nil` when it was optional and absent."
   @spec usage(t()) :: Usage.t() | nil
@@ -31,8 +35,8 @@ defmodule PtcLlmHttp.Response do
   def metadata(%__MODULE__{metadata: metadata}), do: metadata
 
   @doc false
-  def new(content, usage, metadata) do
-    %__MODULE__{content: content, tool_calls: [], usage: usage, metadata: metadata}
+  def new(content, tool_calls, usage, metadata) do
+    %__MODULE__{content: content, tool_calls: tool_calls, usage: usage, metadata: metadata}
   end
 end
 

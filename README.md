@@ -3,9 +3,9 @@
 Bounded BEAM-native HTTP transport and wire codecs for LLM requests.
 
 > **Status: pre-alpha.** The bounded HTTP/1 core and public OpenAI-compatible
-> non-streaming text call are available. Tools, structured output, and
-> streaming remain later slices under the approved implementation plan in
-> `docs/plans/`.
+> non-streaming text, function-tool, and strict structured-output calls are
+> available. Streaming remains a later slice under the approved implementation
+> plan in `docs/plans/`.
 
 ## What this is
 
@@ -42,7 +42,7 @@ A new attempt against another model or provider is a new call by the consumer,
 with its own authority, capacity, budget, and record. This library never
 decides to try again.
 
-## Text calls
+## Non-streaming calls
 
 Construct a validated `PtcLlmHttp.Target`, `PtcLlmHttp.Request`, absolute
 `PtcLlmHttp.Deadline`, call-local `PtcLlmHttp.Credential`, and aggregate
@@ -51,13 +51,20 @@ and usage are available through explicit redacted-value accessors. Expected
 wire and provider failures return the closed facts in
 `PtcLlmHttp.Error.contract/0`; raw provider text is never returned.
 
+Requests can declare bounded strict function tools, replay assistant tool calls,
+append ordered tool results, and request either strict JSON Schema output or the
+older JSON-object mode when the target advertises it. Returned function
+arguments are decoded to objects, checked against the declared tool schema, and
+exposed through redacted `PtcLlmHttp.ToolCall` values. Structured content is
+validated locally and returned as deterministic canonical JSON.
+
 ## Requirements
 
-Elixir `~> 1.15` and Erlang/OTP 26 or later. The OTP floor is what the bounded
-socket and TLS behavior needs, not a preference — see
+Elixir `~> 1.20` and Erlang/OTP 29 or later. This is the supported consumer and
+development baseline; earlier OTP measurements remain documented in
 [docs/transport-backend.md](https://github.com/andreasronge/ptc_llm_http/blob/main/docs/transport-backend.md)
-— and CI runs the transport suite on it. Development uses the toolchain pinned
-in `mise.toml`.
+as historical transport evidence. CI runs the complete suite on OTP 29 on Linux
+and macOS.
 
 ## Development
 

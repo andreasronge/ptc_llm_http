@@ -106,7 +106,7 @@ defmodule PtcLlmHttp.ValueContractsTest do
       contract = Error.contract()
       entries = contract.entries
 
-      assert contract.version == "error-openai-v1"
+      assert contract.version == "error-openai-v2"
       assert Enum.map(entries, & &1.id) == Enum.sort(Enum.map(entries, & &1.id))
       assert length(entries) == length(Enum.uniq_by(entries, & &1.id))
 

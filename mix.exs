@@ -5,13 +5,10 @@ defmodule PtcLlmHttp.MixProject do
   @version "0.0.1"
   @source_url "https://github.com/andreasronge/ptc_llm_http"
 
-  # Fixed by the socket/TLS spike, not guessed: OTP 26 is the oldest release
-  # carrying every primitive the transport needs -- in-memory platform trust
-  # through `:public_key.cacerts_get/0`, the TLS 1.3 client, and the bounded
-  # handshake options -- and the oldest pair CI runs the suite on. The
-  # reasoning and the measurements are in docs/transport-backend.md. Mix has no
-  # OTP requirement key, so the check is here.
-  @minimum_otp 26
+  # The only consumer and this package use one supported baseline: OTP 29.
+  # Earlier releases were useful during the transport spike, but are not part
+  # of the package contract. Mix has no OTP requirement key, so enforce it here.
+  @minimum_otp 29
 
   if String.to_integer(System.otp_release()) < @minimum_otp do
     Mix.raise(
@@ -23,12 +20,10 @@ defmodule PtcLlmHttp.MixProject do
     [
       app: @app,
       version: @version,
-      # The consumer surface, not the development surface: this library's only
-      # runtime dependency is Jason, and `scripts/ci/minimum-elixir.sh` compiles
-      # it under this version with nothing else fetched. The lint and property
-      # tooling needs a newer Elixir, so the suite itself runs one tier above
-      # (see the `compat` job). The OTP floor is `@minimum_otp` above.
-      elixir: "~> 1.15",
+      # The consumer surface and development surface intentionally share one
+      # baseline. `scripts/ci/minimum-elixir.sh` proves the library compiles
+      # there with only its runtime dependency fetched.
+      elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),

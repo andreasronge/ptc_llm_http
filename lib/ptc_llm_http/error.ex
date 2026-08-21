@@ -36,6 +36,7 @@ defmodule PtcLlmHttp.Error do
           | :http_status
           | :malformed_provider_response
           | :provider_result_too_large
+          | :model_refusal
           | :malformed_stream
           | :stream_too_large
           | :invalid_tool_arguments
@@ -90,6 +91,7 @@ defmodule PtcLlmHttp.Error do
     :http_status,
     :malformed_provider_response,
     :provider_result_too_large,
+    :model_refusal,
     :malformed_stream,
     :stream_too_large,
     :invalid_tool_arguments
@@ -300,6 +302,15 @@ defmodule PtcLlmHttp.Error do
                  dispatches: [:possibly_sent, :completed]
                },
                %{
+                 id: :wire_model_refusal,
+                 kind: :model_refusal,
+                 phases: [:decode],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:model],
+                 dispatches: [:completed]
+               },
+               %{
                  id: :wire_provider_result_too_large,
                  kind: :provider_result_too_large,
                  phases: [:decode],
@@ -379,7 +390,7 @@ defmodule PtcLlmHttp.Error do
   @spec contract() :: map()
   def contract do
     %{
-      version: "error-openai-v1",
+      version: "error-openai-v2",
       entries: @entries,
       enums: %{
         kinds: @kinds,

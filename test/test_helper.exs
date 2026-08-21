@@ -7,8 +7,6 @@ end
 
 # Tag meanings:
 #
-#   * `:compat`  - runs only against a non-default Elixir/OTP pair. The
-#                  compatibility job in CI and `mix full_check` include it.
 #   * `:release` - needs an assembled release or a built package tarball.
 #                  `scripts/ci/release.sh` and `scripts/ci/package.sh` own it.
 #   * `:soak`    - long-running resource/leak suite; `mix soak` runs it.
@@ -16,4 +14,4 @@ end
 # Anything excluded here must be run by a named gate, and that gate must be
 # listed in AGENTS.md. Never exclude a tag merely because it is slow: the
 # per-commit gate is kept small by moving *platform* work out, not coverage.
-ExUnit.start(exclude: [:compat, :release, :soak])
+ExUnit.start(exclude: [:release, :soak])
