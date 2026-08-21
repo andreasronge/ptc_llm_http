@@ -87,7 +87,8 @@ mise install                 # Erlang/Elixir toolchain
 mix deps.get
 ./scripts/install-hooks.sh   # once per clone or worktree
 
-mix check                    # per-commit gate: format, compile, Credo, tests
+mix check                    # per-commit gate: format, compile, Credo,
+                             # duplication, tests
 mix full_check               # before push or release: adds Dialyzer, docs,
                              # dependency audit, release smoke, package contents
 ```
