@@ -88,6 +88,71 @@ defmodule PtcLlmHttp.ValueContractsTest do
       error = Error.build!(:capacity_exhausted, :admission, :capacity, :not_sent)
       assert inspect(error) == "#PtcLlmHttp.Error<redacted>"
       assert error.kind == :capacity_exhausted
+      assert Error.facts(error).kind == :capacity_exhausted
+      assert inspect(error) == "#PtcLlmHttp.Error<redacted>"
+    end
+
+    test "facts/1 returns only the closed instance projection" do
+      base = Error.build!(:capacity_exhausted, :admission, :capacity, :not_sent)
+
+      assert Error.facts(base) == %{
+               kind: :capacity_exhausted,
+               phase: :admission,
+               scope: :capacity,
+               dispatch: :not_sent,
+               http_status: nil,
+               provider_code: nil
+             }
+
+      status =
+        Error.build!(:http_status, :decode, :provider, :completed, 503, nil)
+
+      assert Error.facts(status) == %{
+               kind: :http_status,
+               phase: :decode,
+               scope: :provider,
+               dispatch: :completed,
+               http_status: 503,
+               provider_code: nil
+             }
+
+      quota =
+        Error.build!(
+          :http_status,
+          :decode,
+          :model,
+          :completed,
+          429,
+          :organization_spend_limit_exceeded
+        )
+
+      assert Error.facts(quota) == %{
+               kind: :http_status,
+               phase: :decode,
+               scope: :model,
+               dispatch: :completed,
+               http_status: 429,
+               provider_code: :organization_spend_limit_exceeded
+             }
+
+      assert Enum.sort(Map.keys(Error.facts(quota))) == [
+               :dispatch,
+               :http_status,
+               :kind,
+               :phase,
+               :provider_code,
+               :scope
+             ]
+    end
+
+    test "facts/1 preserves every documented dispatch state" do
+      not_sent = Error.build!(:invalid_target, :validate, :request, :not_sent)
+      possibly_sent = Error.build!(:connection_closed, :send, :transport, :possibly_sent)
+      completed = Error.build!(:model_refusal, :decode, :model, :completed, 200, nil)
+
+      assert Error.facts(not_sent).dispatch == :not_sent
+      assert Error.facts(possibly_sent).dispatch == :possibly_sent
+      assert Error.facts(completed).dispatch == :completed
     end
 
     test "rejects kind/phase/scope combinations outside the contract" do
@@ -127,26 +192,44 @@ defmodule PtcLlmHttp.ValueContractsTest do
       assert Enum.sort(Enum.uniq(Enum.map(entries, & &1.kind))) ==
                Enum.sort(contract.enums.kinds)
 
-      Enum.each(entries, fn entry ->
-        statuses = if entry.statuses == [], do: [nil], else: Enum.to_list(entry.statuses)
-        codes = if entry.provider_codes == [], do: [nil], else: entry.provider_codes
+      constructed_dispatches =
+        Enum.flat_map(entries, fn entry ->
+          statuses = if entry.statuses == [], do: [nil], else: Enum.to_list(entry.statuses)
+          codes = if entry.provider_codes == [], do: [nil], else: entry.provider_codes
 
-        for phase <- entry.phases,
-            scope <- entry.scopes,
-            dispatch <- entry.dispatches,
-            status <- statuses,
-            code <- codes do
-          assert {:ok, %Error{}} =
-                   Error.new(
+          for phase <- entry.phases,
+              scope <- entry.scopes,
+              dispatch <- entry.dispatches,
+              status <- statuses,
+              code <- codes do
+            assert {:ok, error} =
+                     Error.new(
+                       kind: entry.kind,
+                       phase: phase,
+                       scope: scope,
+                       dispatch: dispatch,
+                       http_status: status,
+                       provider_code: code
+                     )
+
+            facts = Error.facts(error)
+
+            assert facts == %{
                      kind: entry.kind,
                      phase: phase,
                      scope: scope,
                      dispatch: dispatch,
                      http_status: status,
                      provider_code: code
-                   )
-        end
-      end)
+                   }
+
+            assert inspect(error) == "#PtcLlmHttp.Error<redacted>"
+            facts.dispatch
+          end
+        end)
+
+      assert Enum.sort(Enum.uniq(constructed_dispatches)) ==
+               Enum.sort(contract.enums.dispatches)
     end
   end
 end
