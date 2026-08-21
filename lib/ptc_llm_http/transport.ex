@@ -5,7 +5,7 @@ defmodule PtcLlmHttp.Transport do
   alias PtcLlmHttp.Http.{Parser, Request}
   alias PtcLlmHttp.Transport.{Dns, Tcp, Tls, Trust}
 
-  @option_keys [:resolver, :trust]
+  @option_keys [:decoder, :resolver, :trust]
 
   @doc false
   @spec request(
@@ -84,7 +84,8 @@ defmodule PtcLlmHttp.Transport do
              body: body,
              encoded_bytes: encoded_bytes,
              resolver: Keyword.get(options, :resolver, &Dns.system_resolve/1),
-             trust: Keyword.get(options, :trust, :system)
+             trust: Keyword.get(options, :trust, :system),
+             decoder: Keyword.get(options, :decoder, fn response -> {:ok, response} end)
            }}
 
         Runtime.run_http(runtime, target, budget, deadline, operation)
@@ -165,6 +166,7 @@ defmodule PtcLlmHttp.Transport do
     if Keyword.keyword?(options) and Enum.uniq(Keyword.keys(options)) == Keyword.keys(options) and
          Enum.all?(Keyword.keys(options), &(&1 in @option_keys)) and
          is_function(Keyword.get(options, :resolver, &Dns.system_resolve/1), 1) and
+         is_function(Keyword.get(options, :decoder, fn response -> response end), 1) and
          valid_trust?(Keyword.get(options, :trust, :system)) do
       :ok
     else
@@ -173,10 +175,12 @@ defmodule PtcLlmHttp.Transport do
   end
 
   defp valid_trust?(:system), do: true
+  defp valid_trust?([]), do: true
   defp valid_trust?([_ | _] = certificates), do: Enum.all?(certificates, &is_binary/1)
   defp valid_trust?(_trust), do: false
 
   defp authorities(:http, _trust), do: {:ok, []}
   defp authorities(:https, :system), do: Trust.system_authorities()
+  defp authorities(:https, []), do: {:error, :no_trust_store}
   defp authorities(:https, [_ | _] = certificates), do: {:ok, certificates}
 end

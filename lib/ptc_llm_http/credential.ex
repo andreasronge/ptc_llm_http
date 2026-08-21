@@ -43,6 +43,17 @@ defmodule PtcLlmHttp.Credential do
   def authorization_value(%__MODULE__{kind: :none}), do: nil
   def authorization_value(%__MODULE__{kind: :bearer, secret: secret}), do: ["Bearer ", secret]
 
+  @doc false
+  @spec validate(term()) :: {:ok, t()} | :error
+  def validate(%__MODULE__{kind: :none, secret: nil} = credential), do: {:ok, credential}
+
+  def validate(%__MODULE__{kind: :bearer, secret: secret} = credential)
+      when is_binary(secret) and byte_size(secret) > 0 and byte_size(secret) <= @bearer_bytes do
+    if bearer_token?(secret), do: {:ok, credential}, else: :error
+  end
+
+  def validate(_credential), do: :error
+
   defp bearer_token?(secret) do
     case :binary.match(secret, "=") do
       :nomatch ->

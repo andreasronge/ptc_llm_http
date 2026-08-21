@@ -2,11 +2,10 @@
 
 Bounded BEAM-native HTTP transport and wire codecs for LLM requests.
 
-> **Status: pre-alpha.** Validated targets, call-local credentials, absolute
-> deadlines, process budgets, and the fail-stop physical-admission runtime are
-> in place. The bounded HTTP/1 core now works against internal raw fixtures;
-> provider codecs and the public call API land in later slices under the
-> approved implementation plan in `docs/plans/`.
+> **Status: pre-alpha.** The bounded HTTP/1 core and public OpenAI-compatible
+> non-streaming text call are available. Tools, structured output, and
+> streaming remain later slices under the approved implementation plan in
+> `docs/plans/`.
 
 ## What this is
 
@@ -42,6 +41,15 @@ returns a consumer type.
 A new attempt against another model or provider is a new call by the consumer,
 with its own authority, capacity, budget, and record. This library never
 decides to try again.
+
+## Text calls
+
+Construct a validated `PtcLlmHttp.Target`, `PtcLlmHttp.Request`, absolute
+`PtcLlmHttp.Deadline`, call-local `PtcLlmHttp.Credential`, and aggregate
+`PtcLlmHttp.ProcessBudget`, then call `PtcLlmHttp.call/4`. Successful content
+and usage are available through explicit redacted-value accessors. Expected
+wire and provider failures return the closed facts in
+`PtcLlmHttp.Error.contract/0`; raw provider text is never returned.
 
 ## Requirements
 

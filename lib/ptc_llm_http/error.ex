@@ -110,111 +110,282 @@ defmodule PtcLlmHttp.Error do
   ]
   @scopes [:request, :credential, :capacity, :transport, :provider, :model]
   @dispatches [:not_sent, :possibly_sent, :completed]
-
-  @entries [
-    %{
-      id: :base_callback_failed,
-      kind: :callback_failed,
-      phases: [:stream],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:provider],
-      dispatches: [:possibly_sent, :completed]
-    },
-    %{
-      id: :base_capacity_exhausted,
-      kind: :capacity_exhausted,
-      phases: [:admission],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:capacity],
-      dispatches: [:not_sent]
-    },
-    %{
-      id: :base_deadline_exceeded,
-      kind: :deadline_exceeded,
-      phases: @phases,
-      statuses: [],
-      provider_codes: [],
-      scopes: [:transport],
-      dispatches: @dispatches
-    },
-    %{
-      id: :base_internal_failure,
-      kind: :internal_failure,
-      phases: @phases,
-      statuses: [],
-      provider_codes: [],
-      scopes: [:transport],
-      dispatches: @dispatches
-    },
-    %{
-      id: :base_invalid_credential,
-      kind: :invalid_credential,
-      phases: [:validate],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:credential],
-      dispatches: [:not_sent]
-    },
-    %{
-      id: :base_invalid_request,
-      kind: :invalid_request,
-      phases: [:validate, :encode],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:request],
-      dispatches: [:not_sent]
-    },
-    %{
-      id: :base_invalid_target,
-      kind: :invalid_target,
-      phases: [:validate],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:request],
-      dispatches: [:not_sent]
-    },
-    %{
-      id: :base_resource_limit_exceeded,
-      kind: :resource_limit_exceeded,
-      phases: @phases,
-      statuses: [],
-      provider_codes: [],
-      scopes: [:capacity],
-      dispatches: @dispatches
-    },
-    %{
-      id: :base_runtime_unavailable,
-      kind: :runtime_unavailable,
-      phases: @phases,
-      statuses: [],
-      provider_codes: [],
-      scopes: [:capacity],
-      dispatches: @dispatches
-    },
-    %{
-      id: :base_unsupported_capability,
-      kind: :unsupported_capability,
-      phases: [:validate, :encode],
-      statuses: [],
-      provider_codes: [],
-      scopes: [:request, :model],
-      dispatches: [:not_sent]
-    }
+  @provider_codes [
+    :credit_balance_exhausted,
+    :organization_spend_limit_exceeded,
+    :organization_usage_limit_exceeded,
+    :project_spend_limit_exceeded
   ]
+
+  @entries Enum.sort_by(
+             [
+               %{
+                 id: :base_callback_failed,
+                 kind: :callback_failed,
+                 phases: [:stream],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:possibly_sent, :completed]
+               },
+               %{
+                 id: :base_capacity_exhausted,
+                 kind: :capacity_exhausted,
+                 phases: [:admission],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:capacity],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :base_deadline_exceeded,
+                 kind: :deadline_exceeded,
+                 phases: @phases,
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: @dispatches
+               },
+               %{
+                 id: :base_internal_failure,
+                 kind: :internal_failure,
+                 phases: @phases,
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: @dispatches
+               },
+               %{
+                 id: :base_invalid_credential,
+                 kind: :invalid_credential,
+                 phases: [:validate],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:credential],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :base_invalid_request,
+                 kind: :invalid_request,
+                 phases: [:validate, :encode],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:request],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :base_invalid_target,
+                 kind: :invalid_target,
+                 phases: [:validate],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:request],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :base_resource_limit_exceeded,
+                 kind: :resource_limit_exceeded,
+                 phases: @phases,
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:capacity],
+                 dispatches: @dispatches
+               },
+               %{
+                 id: :base_runtime_unavailable,
+                 kind: :runtime_unavailable,
+                 phases: @phases,
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:capacity],
+                 dispatches: @dispatches
+               },
+               %{
+                 id: :base_unsupported_capability,
+                 kind: :unsupported_capability,
+                 phases: [:validate, :encode],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:request, :model],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :wire_address_rejected,
+                 kind: :address_rejected,
+                 phases: [:dns],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :wire_connect_failure,
+                 kind: :connect_failure,
+                 phases: [:connect],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :wire_connection_closed,
+                 kind: :connection_closed,
+                 phases: [:send, :receive_head, :receive_body],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_dns_failure,
+                 kind: :dns_failure,
+                 phases: [:dns],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :wire_http_status,
+                 kind: :http_status,
+                 phases: [:decode],
+                 statuses: 400..599,
+                 provider_codes: [],
+                 scopes: [:provider, :model],
+                 dispatches: [:completed]
+               },
+               %{
+                 id: :wire_http_status_quota,
+                 kind: :http_status,
+                 phases: [:decode],
+                 statuses: [429],
+                 provider_codes: @provider_codes,
+                 scopes: [:provider, :model],
+                 dispatches: [:completed]
+               },
+               %{
+                 id: :wire_invalid_tool_arguments,
+                 kind: :invalid_tool_arguments,
+                 phases: [:decode],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:completed]
+               },
+               %{
+                 id: :wire_malformed_http,
+                 kind: :malformed_http,
+                 phases: [:receive_head, :receive_body],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_malformed_provider_response,
+                 kind: :malformed_provider_response,
+                 phases: [:decode],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:completed]
+               },
+               %{
+                 id: :wire_malformed_stream,
+                 kind: :malformed_stream,
+                 phases: [:stream],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:possibly_sent, :completed]
+               },
+               %{
+                 id: :wire_provider_result_too_large,
+                 kind: :provider_result_too_large,
+                 phases: [:decode],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:completed]
+               },
+               %{
+                 id: :wire_response_too_large,
+                 kind: :response_too_large,
+                 phases: [:receive_head, :receive_body],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_stream_too_large,
+                 kind: :stream_too_large,
+                 phases: [:stream],
+                 statuses: 200..299,
+                 provider_codes: [],
+                 scopes: [:provider],
+                 dispatches: [:possibly_sent, :completed]
+               },
+               %{
+                 id: :wire_tls_failure,
+                 kind: :tls_failure,
+                 phases: [:tls],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:not_sent]
+               },
+               %{
+                 id: :wire_unsupported_content_encoding,
+                 kind: :unsupported_content_encoding,
+                 phases: [:receive_head],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_unsupported_framing,
+                 kind: :unsupported_framing,
+                 phases: [:receive_head],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_unsupported_redirect,
+                 kind: :unsupported_redirect,
+                 phases: [:receive_head],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               },
+               %{
+                 id: :wire_unsupported_transfer_encoding,
+                 kind: :unsupported_transfer_encoding,
+                 phases: [:receive_head],
+                 statuses: [],
+                 provider_codes: [],
+                 scopes: [:transport],
+                 dispatches: [:possibly_sent]
+               }
+             ],
+             & &1.id
+           )
 
   @doc "Returns the versioned, data-only error mapping contract."
   @spec contract() :: map()
   def contract do
     %{
-      version: "error-base-v1",
+      version: "error-openai-v1",
       entries: @entries,
       enums: %{
         kinds: @kinds,
         phases: @phases,
         scopes: @scopes,
-        provider_codes: [],
+        provider_codes: @provider_codes,
         dispatches: @dispatches
       }
     }
@@ -236,18 +407,36 @@ defmodule PtcLlmHttp.Error do
   @doc false
   @spec build!(kind(), phase(), scope(), dispatch()) :: t()
   def build!(kind, phase, scope, dispatch) do
+    build!(kind, phase, scope, dispatch, nil, nil)
+  end
+
+  @doc false
+  @spec build!(kind(), phase(), scope(), dispatch(), nil | 100..599, nil | atom()) :: t()
+  def build!(kind, phase, scope, dispatch, http_status, provider_code) do
     {:ok, error} =
       new(
         kind: kind,
         phase: phase,
         scope: scope,
         dispatch: dispatch,
-        http_status: nil,
-        provider_code: nil
+        http_status: http_status,
+        provider_code: provider_code
       )
 
     error
   end
+
+  @doc false
+  @spec validate(term()) :: {:ok, t()} | :error
+  def validate(%__MODULE__{} = error) do
+    facts = Map.from_struct(error)
+
+    if Enum.count(@entries, &matches?(&1, facts)) == 1,
+      do: {:ok, error},
+      else: :error
+  end
+
+  def validate(_error), do: :error
 
   defp exact_facts(options) do
     keys = [:kind, :phase, :scope, :dispatch, :http_status, :provider_code]
@@ -262,11 +451,16 @@ defmodule PtcLlmHttp.Error do
   defp matches?(entry, facts) do
     entry.kind == facts.kind and facts.phase in entry.phases and facts.scope in entry.scopes and
       facts.dispatch in entry.dispatches and status_matches?(entry.statuses, facts.http_status) and
-      facts.provider_code in [nil | entry.provider_codes]
+      provider_code_matches?(entry.provider_codes, facts.provider_code)
   end
 
   defp status_matches?([], nil), do: true
-  defp status_matches?(statuses, status), do: status in statuses
+  defp status_matches?(%Range{} = statuses, status), do: status in statuses
+  defp status_matches?(statuses, status) when is_list(statuses), do: status in statuses
+
+  defp provider_code_matches?([], nil), do: true
+  defp provider_code_matches?([_ | _] = codes, code), do: code in codes
+  defp provider_code_matches?(_codes, _code), do: false
 end
 
 defimpl Inspect, for: PtcLlmHttp.Error do

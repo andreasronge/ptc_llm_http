@@ -106,16 +106,46 @@ defmodule PtcLlmHttp.ValueContractsTest do
       contract = Error.contract()
       entries = contract.entries
 
-      assert contract.version == "error-base-v1"
+      assert contract.version == "error-openai-v1"
       assert Enum.map(entries, & &1.id) == Enum.sort(Enum.map(entries, & &1.id))
       assert length(entries) == length(Enum.uniq_by(entries, & &1.id))
-      assert contract.enums.provider_codes == []
+
+      assert contract.enums.provider_codes == [
+               :credit_balance_exhausted,
+               :organization_spend_limit_exceeded,
+               :organization_usage_limit_exceeded,
+               :project_spend_limit_exceeded
+             ]
 
       Enum.each(entries, fn entry ->
         assert entry.kind in contract.enums.kinds
         assert Enum.all?(entry.phases, &(&1 in contract.enums.phases))
         assert Enum.all?(entry.scopes, &(&1 in contract.enums.scopes))
         assert Enum.all?(entry.dispatches, &(&1 in contract.enums.dispatches))
+      end)
+
+      assert Enum.sort(Enum.uniq(Enum.map(entries, & &1.kind))) ==
+               Enum.sort(contract.enums.kinds)
+
+      Enum.each(entries, fn entry ->
+        statuses = if entry.statuses == [], do: [nil], else: Enum.to_list(entry.statuses)
+        codes = if entry.provider_codes == [], do: [nil], else: entry.provider_codes
+
+        for phase <- entry.phases,
+            scope <- entry.scopes,
+            dispatch <- entry.dispatches,
+            status <- statuses,
+            code <- codes do
+          assert {:ok, %Error{}} =
+                   Error.new(
+                     kind: entry.kind,
+                     phase: phase,
+                     scope: scope,
+                     dispatch: dispatch,
+                     http_status: status,
+                     provider_code: code
+                   )
+        end
       end)
     end
   end

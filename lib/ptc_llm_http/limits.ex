@@ -20,6 +20,11 @@ defmodule PtcLlmHttp.Limits do
   @chunk_line_bytes 1_024
   @trailer_bytes 16_384
   @trailer_fields 64
+  @messages 1_024
+  @integer_parameter_min -9_223_372_036_854_775_808
+  @integer_parameter_max 9_223_372_036_854_775_807
+  @json_depth 64
+  @json_nodes 100_000
   @dns_addresses 8
   @connect_policy_cidrs 32
   @process_budget_min 100_000
@@ -47,6 +52,11 @@ defmodule PtcLlmHttp.Limits do
   def chunk_line_bytes, do: @chunk_line_bytes
   def trailer_bytes, do: @trailer_bytes
   def trailer_fields, do: @trailer_fields
+  def messages, do: @messages
+  def integer_parameter_min, do: @integer_parameter_min
+  def integer_parameter_max, do: @integer_parameter_max
+  def json_depth, do: @json_depth
+  def json_nodes, do: @json_nodes
   def dns_addresses, do: @dns_addresses
   def connect_policy_cidrs, do: @connect_policy_cidrs
   def process_budget_min, do: @process_budget_min

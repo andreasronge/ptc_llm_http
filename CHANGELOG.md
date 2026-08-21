@@ -11,6 +11,14 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- Public bounded OpenAI-compatible non-streaming text calls with validated and
+  redacted requests, deterministic `/chat/completions` encoding, response and
+  usage accessors, bounded codec-role JSON decoding, exact local wire fixtures,
+  and one-attempt integration coverage.
+- The completed `error-openai-v1` contract, including classified DNS,
+  connection, TLS, HTTP framing, response-limit, status, documented provider
+  code, and malformed-provider-response facts with exhaustive contract tests.
+
 - A runtime-gated HTTP/1.1 core with bounded DNS results, address-policy
   enforcement, one pinned TCP/TLS connection, exact request serialization,
   strict incremental response parsing, content-length and chunked framing,
