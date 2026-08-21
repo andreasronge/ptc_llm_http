@@ -47,8 +47,9 @@ Construct a validated `PtcLlmHttp.Target`, `PtcLlmHttp.Request`, absolute
 `PtcLlmHttp.Deadline`, call-local `PtcLlmHttp.Credential`, and aggregate
 `PtcLlmHttp.ProcessBudget`, then call `PtcLlmHttp.call/4`. Successful content
 and usage are available through explicit redacted-value accessors. Expected
-wire and provider failures return the closed facts in
-`PtcLlmHttp.Error.contract/0`; raw provider text is never returned.
+wire and provider failures return `%PtcLlmHttp.Error{}`. Instance facts are
+read through `PtcLlmHttp.Error.facts/1`; the versioned mapping space is
+`PtcLlmHttp.Error.contract/0`. Raw provider text is never returned.
 
 Requests can declare bounded strict function tools, replay assistant tool calls,
 append ordered tool results, and request either strict JSON Schema output or the

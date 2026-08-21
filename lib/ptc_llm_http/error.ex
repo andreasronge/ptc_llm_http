@@ -4,8 +4,8 @@ defmodule PtcLlmHttp.Error do
 
   Errors contain only package vocabulary. They never retain endpoint values,
   credentials, request or response bodies, provider text, or raw exit reasons.
-  `contract/0` is the versioned data projection consumers use for exhaustive
-  mapping.
+  `contract/0` is the versioned enumeration of constructible combinations.
+  `facts/1` is the instance projection of one validated error.
   """
 
   @enforce_keys [:kind, :phase, :scope, :dispatch]
@@ -57,13 +57,28 @@ defmodule PtcLlmHttp.Error do
   @type scope :: :request | :credential | :capacity | :transport | :provider | :model
   @type dispatch :: :not_sent | :possibly_sent | :completed
 
+  @type provider_code ::
+          :credit_balance_exhausted
+          | :organization_spend_limit_exceeded
+          | :organization_usage_limit_exceeded
+          | :project_spend_limit_exceeded
+
+  @type facts :: %{
+          kind: kind(),
+          phase: phase(),
+          scope: scope(),
+          dispatch: dispatch(),
+          http_status: nil | 100..599,
+          provider_code: nil | provider_code()
+        }
+
   @opaque t :: %__MODULE__{
             kind: kind(),
             phase: phase(),
             scope: scope(),
             dispatch: dispatch(),
             http_status: nil | 100..599,
-            provider_code: nil | atom()
+            provider_code: nil | provider_code()
           }
 
   @kinds [
@@ -386,6 +401,26 @@ defmodule PtcLlmHttp.Error do
              & &1.id
            )
 
+  @doc """
+  Returns the closed, safe instance projection.
+
+  The map contains only package vocabulary: kind, phase, scope, dispatch,
+  optional HTTP status, and optional documented provider code. It never includes
+  provider text, request or response bodies, endpoint, model, headers,
+  credential material, or a raw cause.
+  """
+  @spec facts(t()) :: facts()
+  def facts(%__MODULE__{} = error) do
+    %{
+      kind: error.kind,
+      phase: error.phase,
+      scope: error.scope,
+      dispatch: error.dispatch,
+      http_status: error.http_status,
+      provider_code: error.provider_code
+    }
+  end
+
   @doc "Returns the versioned, data-only error mapping contract."
   @spec contract() :: map()
   def contract do
@@ -422,7 +457,8 @@ defmodule PtcLlmHttp.Error do
   end
 
   @doc false
-  @spec build!(kind(), phase(), scope(), dispatch(), nil | 100..599, nil | atom()) :: t()
+  @spec build!(kind(), phase(), scope(), dispatch(), nil | 100..599, nil | provider_code()) ::
+          t()
   def build!(kind, phase, scope, dispatch, http_status, provider_code) do
     {:ok, error} =
       new(
