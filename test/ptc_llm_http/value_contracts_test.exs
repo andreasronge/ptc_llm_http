@@ -1,5 +1,6 @@
 defmodule PtcLlmHttp.ValueContractsTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias PtcLlmHttp.{Credential, Deadline, Error, Limits, ProcessBudget, ResourceContract}
 
@@ -112,7 +113,17 @@ defmodule PtcLlmHttp.ValueContractsTest do
     end
 
     test "every catalog aggregate keeps positive roles that sum to the total" do
-      totals = [100_000, 100_003, 1_000_000, 3_999_999, 4_000_000, 40_000_000, 2_073_600_000]
+      totals = [
+        100_000,
+        100_003,
+        1_000_000,
+        3_999_999,
+        4_000_000,
+        5_000_000,
+        10_000_000,
+        40_000_000,
+        2_073_600_000
+      ]
 
       Enum.each(totals, fn total ->
         assert {:ok, budget} = ProcessBudget.new(total_heap_words: total)
@@ -123,8 +134,24 @@ defmodule PtcLlmHttp.ValueContractsTest do
       end)
     end
 
+    property "random aggregates keep positive roles that sum to the total" do
+      check all(total <- integer(Limits.process_budget_min()..Limits.process_budget_max())) do
+        assert {:ok, budget} = ProcessBudget.new(total_heap_words: total)
+        partition = ProcessBudget.partition(budget)
+
+        assert map_size(partition) == 7
+        assert Enum.sum(Map.values(partition)) == total
+        assert Enum.all?(Map.values(partition), &(&1 > 0))
+      end
+    end
+
     test "maximum concurrency times the hostname budget is the attempt-heap exposure" do
-      hostname = 4_000_000
+      hostname = Limits.process_budget_hostname()
+      {:ok, budget} = ProcessBudget.new(total_heap_words: hostname)
+      partition = ProcessBudget.partition(budget)
+
+      assert Enum.sum(Map.values(partition)) == hostname
+      assert partition.dns == Limits.dns_role_heap_floor()
       assert Limits.max_concurrency() * hostname == 4_096_000_000
     end
   end

@@ -792,6 +792,10 @@ approved.
 | Result/cause relay role | 10% of aggregate heap words |
 | Aggregate attempt cleanup cutoff | 1,000 milliseconds |
 
+When the DNS floor binds, the non-DNS roles keep those relative weights of
+`(aggregate − 2,000,000)` rather than of the full aggregate. Codec still
+receives the integer remainder of that leftover.
+
 Per-target request/response caps may only narrow the hard maximum. Individual
 prompt, content, schema, tool, argument, and error fields also need caps so one
 field cannot consume an aggregate through an implementation accident. JSON is

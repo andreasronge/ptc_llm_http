@@ -47,6 +47,13 @@ defmodule PtcLlmHttp.Limits do
   @process_budget_max 2_073_600_000
   @process_budget_hostname 4_000_000
   @dns_role_heap_floor 2_000_000
+  @attempt_tree_percent 5
+  @coordinator_percent 5
+  @callback_percent 15
+  @dns_percent 5
+  @socket_percent 20
+  @relay_percent 10
+  @partition_percent_base 100
   @non_dns_partition_percent 95
   @cleanup_milliseconds 1_000
   @cooperative_cleanup_milliseconds 900
@@ -137,13 +144,12 @@ defmodule PtcLlmHttp.Limits do
   end
 
   defp percentage_attempt_partition(total_words) do
-    attempt_tree = div(total_words * 5, 100)
-    coordinator = div(total_words * 5, 100)
-    callback = div(total_words * 15, 100)
-    dns = div(total_words * 5, 100)
-    socket = div(total_words * 20, 100)
-    relay = div(total_words * 10, 100)
-
+    attempt_tree = share(total_words, @attempt_tree_percent, @partition_percent_base)
+    coordinator = share(total_words, @coordinator_percent, @partition_percent_base)
+    callback = share(total_words, @callback_percent, @partition_percent_base)
+    dns = share(total_words, @dns_percent, @partition_percent_base)
+    socket = share(total_words, @socket_percent, @partition_percent_base)
+    relay = share(total_words, @relay_percent, @partition_percent_base)
     codec = total_words - attempt_tree - coordinator - callback - dns - socket - relay
 
     %{
@@ -159,11 +165,11 @@ defmodule PtcLlmHttp.Limits do
 
   defp floored_dns_attempt_partition(total_words) do
     rest = total_words - @dns_role_heap_floor
-    attempt_tree = div(rest * 5, @non_dns_partition_percent)
-    coordinator = div(rest * 5, @non_dns_partition_percent)
-    callback = div(rest * 15, @non_dns_partition_percent)
-    socket = div(rest * 20, @non_dns_partition_percent)
-    relay = div(rest * 10, @non_dns_partition_percent)
+    attempt_tree = share(rest, @attempt_tree_percent, @non_dns_partition_percent)
+    coordinator = share(rest, @coordinator_percent, @non_dns_partition_percent)
+    callback = share(rest, @callback_percent, @non_dns_partition_percent)
+    socket = share(rest, @socket_percent, @non_dns_partition_percent)
+    relay = share(rest, @relay_percent, @non_dns_partition_percent)
     codec = rest - attempt_tree - coordinator - callback - socket - relay
 
     %{
@@ -176,6 +182,8 @@ defmodule PtcLlmHttp.Limits do
       relay: relay
     }
   end
+
+  defp share(total, percent, base), do: div(total * percent, base)
 
   def set_max_heap(words) when is_integer(words) and words > 0 do
     Process.flag(:max_heap_size, %{size: words, kill: true, error_logger: false})
