@@ -51,6 +51,9 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
 
   defp supported(%{kind: :openai_compat, codec_version: "openai-compat-v1"} = target, request) do
     cond do
+      target.upstream_routing == :single_provider ->
+        {:error, Error.build!(:unsupported_capability, :encode, :model, :not_sent)}
+
       request.cache and target.cache_mode == :unsupported ->
         {:error, Error.build!(:unsupported_capability, :encode, :request, :not_sent)}
 
@@ -192,8 +195,7 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
       {:ok, Response.new(content, usage, metadata)}
     else
       {:error, :too_large} -> {:error, result_too_large_error(status)}
-      {:error, %Error{}} = error -> error
-      _invalid -> {:error, malformed_error(status)}
+      {:error, error} -> decode_error(error, status)
     end
   end
 
@@ -248,7 +250,8 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
 
     if optional_non_negative_integer?(prompt) and optional_non_negative_integer?(completion) and
          optional_non_negative_integer?(total) and optional_non_negative_integer?(cached) and
-         optional_non_negative_number?(cost) and token_total_valid?(prompt, completion, total) do
+         optional_non_negative_number?(cost) and token_total_valid?(prompt, completion, total) and
+         cached_tokens_valid?(cached, prompt) do
       {:ok,
        Usage.new(
          prompt_tokens: prompt,
@@ -285,6 +288,14 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
        do: prompt + completion == total
 
   defp token_total_valid?(_prompt, _completion, _total), do: false
+
+  defp cached_tokens_valid?(nil, _prompt), do: true
+
+  defp cached_tokens_valid?(cached, prompt)
+       when is_integer(cached) and is_integer(prompt),
+       do: cached <= prompt
+
+  defp cached_tokens_valid?(_cached, _prompt), do: false
 
   defp optional_non_negative_integer?(nil), do: true
   defp optional_non_negative_integer?(value), do: is_integer(value) and value >= 0
@@ -361,4 +372,11 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
 
   defp result_too_large_error(status),
     do: Error.build!(:provider_result_too_large, :decode, :provider, :completed, status, nil)
+
+  defp decode_error(error, status) do
+    case Error.validate(error) do
+      {:ok, error} -> {:error, error}
+      :error -> {:error, malformed_error(status)}
+    end
+  end
 end

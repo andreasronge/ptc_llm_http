@@ -30,6 +30,7 @@ defmodule PtcLlmHttp.Usage do
   end
 
   @doc false
+  @spec new(keyword()) :: t()
   def new(facts), do: struct!(__MODULE__, facts)
 end
 

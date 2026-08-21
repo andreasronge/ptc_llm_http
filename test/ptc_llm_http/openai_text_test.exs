@@ -44,13 +44,17 @@ defmodule PtcLlmHttp.OpenAITextTest do
     assert {:ok, response} = Task.await(task, 5_000)
     assert Response.content(response) == "private answer"
 
-    assert response |> Response.usage() |> Usage.facts() == %{
+    usage = Response.usage(response)
+
+    assert Usage.facts(usage) == %{
              prompt_tokens: 11,
              completion_tokens: 3,
              total_tokens: 14,
              cached_tokens: 4,
              cost: 0.0007
            }
+
+    assert inspect(usage) == "#PtcLlmHttp.Usage<redacted>"
 
     assert Response.metadata(response) == %{
              status: 200,
@@ -68,30 +72,46 @@ defmodule PtcLlmHttp.OpenAITextTest do
     assert {:ok, %{in_use: 0}} = Runtime.snapshot(runtime)
   end
 
-  test "a documented provider code is retained while raw provider text is discarded" do
-    server = start_supervised!({RawServer, [transport: :tcp]})
-    runtime = runtime()
-    target = loopback_target(server, %{tokens: false, cost: false})
-    request = text_request()
-    task = Task.async(fn -> call(runtime, target, request) end)
+  test "documented provider codes are retained while raw provider text is discarded" do
+    for {provider_code, expected} <- [
+          {"credit_balance_exhausted", :credit_balance_exhausted},
+          {"organization_spend_limit_exceeded", :organization_spend_limit_exceeded},
+          {"organization_usage_limit_exceeded", :organization_usage_limit_exceeded},
+          {"project_spend_limit_exceeded", :project_spend_limit_exceeded}
+        ] do
+      server = start_supervised!({RawServer, [transport: :tcp]}, id: make_ref())
+      runtime = runtime(make_ref())
+      target = loopback_target(server, %{tokens: false, cost: false})
+      request = text_request()
+      task = Task.async(fn -> call(runtime, target, request) end)
 
-    assert :ok = RawServer.await_connection(server)
-    assert {:ok, _request_bytes} = recv_request(server, target, request)
-    body = File.read!(@rate_limit_fixture)
-    :ok = send_response(server, 429, body)
+      assert :ok = RawServer.await_connection(server)
+      assert {:ok, _request_bytes} = recv_request(server, target, request)
 
-    assert {:error,
-            %Error{
-              kind: :http_status,
-              phase: :decode,
-              scope: :provider,
-              dispatch: :completed,
-              http_status: 429,
-              provider_code: :credit_balance_exhausted
-            } = error} = Task.await(task, 5_000)
+      body =
+        Jason.encode!(%{
+          "error" => %{
+            "message" => "private provider detail",
+            "type" => "insufficient_quota",
+            "code" => provider_code
+          }
+        })
 
-    refute inspect(error) =~ "private provider detail"
-    assert RawServer.connection_count(server) == 1
+      :ok = send_response(server, 429, body)
+
+      assert {:error,
+              %Error{
+                kind: :http_status,
+                phase: :decode,
+                scope: :provider,
+                dispatch: :completed,
+                http_status: 429,
+                provider_code: ^expected
+              } = error} = Task.await(task, 5_000)
+
+      refute inspect(error) =~ "private provider detail"
+      assert RawServer.connection_count(server) == 1
+    end
   end
 
   test "provider quota codes are retained only for the documented 429 status" do
@@ -160,6 +180,8 @@ defmodule PtcLlmHttp.OpenAITextTest do
     for {content_type, body} <- [
           {"application/json",
            ~s({"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]})},
+          {"application/json",
+           ~s({"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":0,"completion_tokens":1,"total_tokens":1,"prompt_tokens_details":{"cached_tokens":1}}})},
           {"text/html", "<h1>private upstream error</h1>"}
         ] do
       server = start_supervised!({RawServer, [transport: :tcp]}, id: make_ref())
@@ -190,6 +212,12 @@ defmodule PtcLlmHttp.OpenAITextTest do
 
     assert {:error, %Error{kind: :unsupported_capability, dispatch: :not_sent}} =
              call(runtime, target, cached_request)
+
+    single_provider_target =
+      loopback_target(server, %{tokens: false, cost: false}, :single_provider)
+
+    assert {:error, %Error{kind: :unsupported_capability, dispatch: :not_sent}} =
+             call(runtime, single_provider_target, text_request())
 
     {:ok, expired} = Deadline.new(System.monotonic_time(:millisecond))
 
@@ -228,7 +256,7 @@ defmodule PtcLlmHttp.OpenAITextTest do
     start_supervised!({Runtime, [max_concurrency: 1, groups: %{"group" => 1}]}, id: id)
   end
 
-  defp loopback_target(server, usage_guarantees) do
+  defp loopback_target(server, usage_guarantees, upstream_routing \\ :opaque) do
     {:ok, target} =
       Target.new(
         kind: :openai_compat,
@@ -242,7 +270,7 @@ defmodule PtcLlmHttp.OpenAITextTest do
         streaming: false,
         structured_output: :unsupported,
         cache_mode: :unsupported,
-        upstream_routing: :opaque,
+        upstream_routing: upstream_routing,
         usage_guarantees: usage_guarantees
       )
 

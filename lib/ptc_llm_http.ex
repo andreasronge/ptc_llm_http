@@ -58,8 +58,7 @@ defmodule PtcLlmHttp do
   """
   @spec call(pid(), Target.t(), Request.t(), keyword()) ::
           {:ok, Response.t()} | {:error, Error.t()}
-  def call(runtime, %Target{} = target, %Request{} = request, options)
-      when is_pid(runtime) and is_list(options) do
+  def call(runtime, target, request, options) when is_pid(runtime) and is_list(options) do
     with {:ok, credential, deadline, budget} <- call_options(options),
          {:ok, _remaining} <- Deadline.remaining(deadline),
          {:ok, body} <- OpenAI.encode(target, request) do
@@ -77,8 +76,7 @@ defmodule PtcLlmHttp do
       )
     else
       :error -> invalid_request()
-      {:error, %Error{}} = error -> error
-      _invalid -> invalid_request()
+      {:error, error} -> call_error(error)
     end
   rescue
     _external_input -> invalid_request()
@@ -94,7 +92,7 @@ defmodule PtcLlmHttp do
       deadline = Keyword.fetch!(options, :deadline)
       budget = Keyword.fetch!(options, :process_budget)
 
-      with %Credential{} <- credential,
+      with {:ok, credential} <- Credential.validate(credential),
            {:ok, deadline} <- Deadline.validate(deadline),
            {:ok, budget} <- ProcessBudget.validate(budget) do
         {:ok, credential, deadline, budget}
@@ -108,4 +106,11 @@ defmodule PtcLlmHttp do
 
   defp invalid_request,
     do: {:error, Error.build!(:invalid_request, :validate, :request, :not_sent)}
+
+  defp call_error(error) do
+    case Error.validate(error) do
+      {:ok, error} -> {:error, error}
+      :error -> invalid_request()
+    end
+  end
 end

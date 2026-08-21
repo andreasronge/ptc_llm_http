@@ -426,6 +426,18 @@ defmodule PtcLlmHttp.Error do
     error
   end
 
+  @doc false
+  @spec validate(term()) :: {:ok, t()} | :error
+  def validate(%__MODULE__{} = error) do
+    facts = Map.from_struct(error)
+
+    if Enum.count(@entries, &matches?(&1, facts)) == 1,
+      do: {:ok, error},
+      else: :error
+  end
+
+  def validate(_error), do: :error
+
   defp exact_facts(options) do
     keys = [:kind, :phase, :scope, :dispatch, :http_status, :provider_code]
 
