@@ -9,6 +9,12 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ## [Unreleased]
 
+### Added
+
+- `PtcLlmHttp.Error.facts/1`, a public closed instance projection of kind,
+  phase, scope, dispatch, HTTP status, and documented provider code, so
+  consumers can classify without reading opaque struct keys.
+
 ### Changed
 
 - `ResourceContract.current/0` is now `resource-v2`. It publishes the
@@ -23,6 +29,7 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   rebalances the other roles inside the same total, so callers do not have to
   inflate every ceiling to keep DNS alive. A fresh-OS/BEAM regression covers
   cold and warm `localhost` resolution without a public network.
+
 
 ## [0.1.0] - 2026-08-21
 

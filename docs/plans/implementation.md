@@ -732,6 +732,15 @@ wire proves request bytes could not reach the peer; ambiguity after send begins
 is `:possibly_sent`. PtcRunner decides retryability, `ProviderError` provenance,
 quota policy, and failover from this closed evidence.
 
+Those instance facts are read through `Error.facts/1`, matching the explicit
+accessor pattern used by `Usage.facts/1`. The returned map is exactly
+`%{kind:, phase:, scope:, dispatch:, http_status:, provider_code:}` and never
+includes provider text, request or response bodies, endpoint, model, headers,
+credential material, or a raw cause. `t` remains opaque; consumers must not
+read struct keys. `contract/0` remains the versioned enumeration of
+constructible combinations; `facts/1` is the instance projection of one
+validated error.
+
 `Inspect` is redacted. Public safe details are fixed package vocabulary. V1
 discards provider error text before constructing the result and returns only
 status, a bounded documented provider code, scope, phase, and dispatch state.
