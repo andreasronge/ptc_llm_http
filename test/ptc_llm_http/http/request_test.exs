@@ -4,6 +4,8 @@ defmodule PtcLlmHttp.Http.RequestTest do
   alias PtcLlmHttp.{Credential, Target}
   alias PtcLlmHttp.Http.Request
 
+  @version Mix.Project.config()[:version]
+
   test "serializes one exact credential-free IPv4 request" do
     target = target("http://127.0.0.1:8080/api//a%20b")
 
@@ -17,7 +19,7 @@ defmodule PtcLlmHttp.Http.RequestTest do
                "Accept: application/json\r\n" <>
                "Accept-Encoding: identity\r\n" <>
                "Connection: close\r\n" <>
-               "User-Agent: ptc_llm_http/0.0.1\r\n" <>
+               "User-Agent: ptc_llm_http/#{@version}\r\n" <>
                "Content-Length: 2\r\n\r\n"
 
     assert encoded_bytes == byte_size(head) + 2

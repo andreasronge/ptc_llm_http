@@ -5,6 +5,8 @@ defmodule PtcLlmHttp.OpenAIStreamTest do
   alias PtcLlmHttp.Http.Request, as: HttpRequest
   alias PtcLlmHttp.Test.RawServer
 
+  @version Mix.Project.config()[:version]
+
   alias PtcLlmHttp.{
     Credential,
     Deadline,
@@ -44,7 +46,7 @@ defmodule PtcLlmHttp.OpenAIStreamTest do
         "Accept: text/event-stream\r\n" <>
         "Accept-Encoding: identity\r\n" <>
         "Connection: close\r\n" <>
-        "User-Agent: ptc_llm_http/0.0.1\r\n" <>
+        "User-Agent: ptc_llm_http/#{@version}\r\n" <>
         "Content-Length: #{byte_size(expected_body)}\r\n\r\n"
 
     assert RawServer.recv(server, byte_size(head) + byte_size(expected_body)) ==

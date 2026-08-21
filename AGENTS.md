@@ -10,8 +10,9 @@ you are working on before writing code.
 
 ## Status
 
-Pre-alpha. The repository holds infrastructure and the reserved public
-namespace. No network call is possible yet.
+Pre-alpha. The bounded HTTP/1 core and public OpenAI-compatible text,
+function-tool, strict structured-output, and synchronous text-streaming calls
+are available.
 
 ## Boundaries
 
