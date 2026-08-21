@@ -10,8 +10,9 @@ you are working on before writing code.
 
 ## Status
 
-Pre-alpha. The repository holds infrastructure and the reserved public
-namespace. No network call is possible yet.
+Pre-alpha. The bounded HTTP/1 core and public OpenAI-compatible text,
+function-tool, strict structured-output, and synchronous text-streaming calls
+are available.
 
 ## Boundaries
 
@@ -149,6 +150,36 @@ verified.
 This is a **0.x library** — breaking changes are expected. When refactoring,
 delete old code rather than deprecate it; add no compatibility shims. Explore
 the source before claiming something is missing. Fix code and docs together.
+
+## Cursor Cloud specific instructions
+
+This is a library, not a service: there is nothing to "serve". Development is
+compile / lint / test / release-gate work plus exercising the public API in
+`iex`/`mix run`. The standard commands live in the `## Commands` section above
+and in the README — use those; nothing below repeats them.
+
+- **Toolchain is mise-managed** (Erlang/OTP and Elixir pinned in `mise.toml`,
+ currently OTP 29.0.3 / Elixir 1.20.2-otp-29). The Cloud Agent install script
+ bootstraps `mise` via `https://mise.run` when `$HOME/.local/bin/mise` is
+ missing, then runs `mise install` and `mix deps.get`. You do not need to
+ install the toolchain yourself on a fresh agent.
+- **`mise` is only on `PATH` in interactive shells** (activated via `~/.bashrc`).
+ Non-interactive shells — including the agent's own command tool — do **not**
+ inherit it. Prefix commands with `~/.local/bin/mise exec --`
+ (e.g. `~/.local/bin/mise exec -- mix check`), or run
+ `eval "$(~/.local/bin/mise activate bash)"` first. Bare `mix`/`elixir` will
+ otherwise be "command not found".
+- **Git hooks are not installed automatically.** Run `./scripts/install-hooks.sh`
+ once per clone/worktree if you need them. The `pre-push` hook runs
+ `mix full_check`, whose Dialyzer step builds a core PLT under
+ `~/.cache/ptc_llm_http/dialyzer_plts` on first use (slow the first time, cached
+ after). `mix full_check` passes cleanly in this environment.
+- **Expected test noise:** the suite deliberately kills supervised processes to
+ exercise fault paths, so `[error] GenServer ... terminating ** (stop) killed`
+ and an `SSL WARNING: Ignoring a CA cert` line appear on a *passing* run. Judge
+ the run by the final `Result:` line, not these logs.
+- Tests never touch the public network or real credentials; they script raw
+ local TCP/TLS fixtures, so no secrets are required to run the full suite.
 
 <!-- usage-rules-start -->
 <!-- usage_rules:elixir-start -->

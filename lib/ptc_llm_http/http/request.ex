@@ -4,7 +4,7 @@ defmodule PtcLlmHttp.Http.Request do
   alias PtcLlmHttp.{Credential, Limits, Target}
   alias PtcLlmHttp.Http.Token
 
-  @user_agent "ptc_llm_http/0.0.1"
+  @user_agent "ptc_llm_http/0.1.0"
   @pchar_special ~c"!$&'()*+,-.:;=@_~"
 
   @spec encode(Target.t(), Credential.t(), [binary()], binary()) ::
