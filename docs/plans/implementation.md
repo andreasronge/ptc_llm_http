@@ -1161,13 +1161,19 @@ The OpenAI stream codec:
 - emits text deltas synchronously;
 - rejects tool-call deltas in V1 rather than silently dropping them;
 - requires a closed terminal state;
-- extracts final usage when the target guarantees it; and
+- extracts final usage when the target guarantees it, accepting both the
+  documented OpenAI terminal usage chunk (`choices: []`) and OpenRouter's
+  narrowly bounded repeated empty index-zero finish choice with the same
+  already observed finish reason; the usage event is not delivered to the
+  callback and does not count toward delivered bytes/chunks; and
 - enforces cumulative decoded-text and event-count limits.
 
 Tests cover one large HTTP chunk containing many events, one event split across
 many small writes, comments/heartbeats, multi-line data, invalid JSON, missing
-`[DONE]`, usage before/after completion as supported by fixtures, early
-consumer cancellation, slow consumer backpressure, and flood overflow.
+`[DONE]`, both empty-choice and OpenRouter repeated-finish terminal usage,
+post-finish content/tool/index/reason/usage/`[DONE]` rejections, usage
+before/after completion as supported by fixtures, early consumer cancellation,
+slow consumer backpressure, and flood overflow.
 
 ### Ollama
 
@@ -1563,6 +1569,9 @@ is independently releasable for supported targets.
 - Kept PtcRunner direct callback-consumption and gateway-disconnect tests as the
   separate consumer-repository checkpoint; no Enumerable bridge or producer
   mailbox was added here.
+- 2026-08-21: accepted OpenRouter's repeated-finish terminal usage event as a
+  compatible extension of the documented `choices: []` usage chunk, with a
+  fragmented raw-TCP/SSE regression and a post-finish rejection table.
 
 Exit met in this package: text streaming parity without tool-delta support.
 PtcRunner callback consumption and gateway disconnect remain the pinned next

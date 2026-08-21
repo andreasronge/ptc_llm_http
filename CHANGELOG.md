@@ -9,6 +9,15 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI-compatible text streams now accept OpenRouter's terminal usage event
+  that repeats the already observed empty index-zero finish choice, in addition
+  to the documented OpenAI `choices: []` usage chunk. The usage event is not
+  delivered to the callback. Invalid post-finish content, tool deltas, choice
+  indexes, finish reasons, missing or duplicate usage, and events after
+  `[DONE]` remain malformed streams.
+
 ## [0.1.0] - 2026-08-21
 
 ### Added

@@ -95,7 +95,9 @@ defmodule PtcLlmHttp do
 
   The callback executes synchronously in the attempt's monitored callback
   process and must return `:cont` or `:halt`. No socket bytes are read while a
-  callback invocation is outstanding.
+  callback invocation is outstanding. Terminal usage is accepted as the
+  documented empty-`choices` chunk or as OpenRouter's repeated empty index-zero
+  finish choice; neither form is delivered to the callback.
   """
   @spec stream(pid(), Target.t(), Request.t(), (map() -> :cont | :halt), keyword()) ::
           {:ok, StreamComplete.t()}
