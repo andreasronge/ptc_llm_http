@@ -96,7 +96,7 @@ defmodule PtcLlmHttp.Runtime do
 
   @doc false
   @spec run_http(t(), Target.t(), ProcessBudget.t(), Deadline.t(), {:http, map()}) ::
-          {:ok, term()} | {:error, Error.t()}
+          {:ok, term()} | {:halted, term()} | {:error, Error.t()}
   def run_http(runtime, target, budget, deadline, {:http, spec})
       when is_pid(runtime) and is_map(spec) do
     operation = {:http, Map.put(spec, :deadline, deadline)}

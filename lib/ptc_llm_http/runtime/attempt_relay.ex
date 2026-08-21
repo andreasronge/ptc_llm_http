@@ -63,4 +63,5 @@ defmodule PtcLlmHttp.Runtime.AttemptRelay do
 
   defp category({:error, %Error{}}), do: :classified
   defp category({:ok, _value}), do: :success
+  defp category({:halted, _value}), do: :halted
 end

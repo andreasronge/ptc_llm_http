@@ -11,6 +11,9 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ### Added
 
+- Bounded synchronous OpenAI-compatible text streaming through `stream/5`,
+  including incremental SSE parsing, natural callback backpressure, early halt,
+  terminal usage, redacted stream results, and deterministic cleanup.
 - Strict OpenAI-compatible function tools, assistant/tool replay messages,
   parallel returned tool calls with bounded schema-validated arguments, and
   redacted tool-call accessors.

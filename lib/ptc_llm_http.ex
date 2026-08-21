@@ -32,11 +32,11 @@ defmodule PtcLlmHttp do
 
   ## Status
 
-  Pre-alpha. Bounded OpenAI-compatible text, tool, and structured-output calls
-  are available; streaming lands in a later slice.
+  Pre-alpha. Bounded OpenAI-compatible text, tool, structured-output, and
+  synchronous text-streaming calls are available.
   """
 
-  alias PtcLlmHttp.Codecs.OpenAI
+  alias PtcLlmHttp.Codecs.{OpenAI, OpenAIStream}
 
   alias PtcLlmHttp.{
     Credential,
@@ -45,6 +45,8 @@ defmodule PtcLlmHttp do
     ProcessBudget,
     Request,
     Response,
+    StreamComplete,
+    StreamHalt,
     Target,
     Transport
   }
@@ -87,6 +89,104 @@ defmodule PtcLlmHttp do
   end
 
   def call(_runtime, _target, _request, _options), do: invalid_request()
+
+  @doc """
+  Performs one bounded OpenAI-compatible text-streaming attempt.
+
+  The callback executes synchronously in the attempt's monitored callback
+  process and must return `:cont` or `:halt`. No socket bytes are read while a
+  callback invocation is outstanding.
+  """
+  @spec stream(pid(), Target.t(), Request.t(), (map() -> :cont | :halt), keyword()) ::
+          {:ok, StreamComplete.t()}
+          | {:halted, StreamHalt.t()}
+          | {:error, Error.t()}
+  def stream(runtime, target, request, on_chunk, options)
+      when is_pid(runtime) and is_function(on_chunk, 1) and is_list(options) do
+    with {:ok, credential, deadline, budget} <- call_options(options),
+         {:ok, _remaining} <- Deadline.remaining(deadline),
+         {:ok, body} <- OpenAI.encode_stream(target, request) do
+      decode_context = OpenAI.decode_context(request)
+
+      decoder = fn response ->
+        OpenAI.decode(target, decode_context, byte_size(body), response)
+      end
+
+      target_options = Target.codec_options(target)
+
+      streamer = %{
+        state: OpenAIStream.new(target_options.usage_guarantees),
+        consume: fn state, bytes, callback_role ->
+          OpenAIStream.feed(state, bytes, callback_role, on_chunk)
+        end,
+        complete: fn state, facts -> stream_complete(state, facts, byte_size(body)) end,
+        halt: fn state, facts -> stream_halt(state, facts, byte_size(body)) end
+      }
+
+      Transport.request(
+        runtime,
+        target,
+        credential,
+        ["chat", "completions"],
+        body,
+        budget,
+        deadline,
+        decoder: decoder,
+        streamer: streamer
+      )
+    else
+      :error -> invalid_request()
+      {:error, error} -> call_error(error)
+    end
+  rescue
+    _external_input -> invalid_request()
+  end
+
+  def stream(_runtime, _target, _request, _on_chunk, _options), do: invalid_request()
+
+  defp stream_complete(state, facts, encoded_request_bytes) do
+    case OpenAIStream.finish(state) do
+      {:ok, state} ->
+        stream = OpenAIStream.facts(state)
+
+        {:ok,
+         {:ok,
+          StreamComplete.new(
+            stream.usage,
+            stream.delivered_bytes,
+            stream.delivered_chunks,
+            stream_metadata(facts, encoded_request_bytes)
+          )}}
+
+      {:halt, state} ->
+        {:ok, stream_halt(state, facts, encoded_request_bytes)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp stream_halt(state, facts, encoded_request_bytes) do
+    stream = OpenAIStream.facts(state)
+
+    {:halted,
+     StreamHalt.new(
+       stream.usage,
+       stream.delivered_bytes,
+       stream.delivered_chunks,
+       stream_metadata(facts, encoded_request_bytes)
+     )}
+  end
+
+  defp stream_metadata(facts, encoded_request_bytes) do
+    %{
+      status: facts.status,
+      encoded_request_bytes: encoded_request_bytes,
+      response_bytes: facts.wire_bytes,
+      informational_responses: facts.informational_responses,
+      trailer_fields: facts.trailer_fields
+    }
+  end
 
   defp call_options(options) do
     keys = [:credential, :deadline, :process_budget]

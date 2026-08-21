@@ -59,7 +59,7 @@ defmodule PtcLlmHttp.Runtime.Guardian do
   end
 
   def candidate(guardian, generation, attempt_id, deadline, delivery_ref, category)
-      when category in [:success, :classified] do
+      when category in [:success, :classified, :halted] do
     mutating_call(
       guardian,
       {:candidate, generation, attempt_id, deadline, delivery_ref, category},
@@ -84,6 +84,7 @@ defmodule PtcLlmHttp.Runtime.Guardian do
              :send,
              :receive_head,
              :receive_body,
+             :stream,
              :decode
            ] and dispatch in [:not_sent, :possibly_sent, :completed] do
     mutating_call(
@@ -102,6 +103,7 @@ defmodule PtcLlmHttp.Runtime.Guardian do
              :send,
              :receive_head,
              :receive_body,
+             :stream,
              :decode
            ] and dispatch in [:not_sent, :possibly_sent, :completed] and is_integer(timeout) and
              timeout > 0 do
@@ -165,7 +167,7 @@ defmodule PtcLlmHttp.Runtime.Guardian do
       update_attempt(state, attempt_id, fn attempt ->
         attempt =
           case attempt.candidate do
-            nil -> %{attempt | candidate: {delivery_ref, category}}
+            nil -> record_candidate(attempt, delivery_ref, category)
             _already_recorded -> attempt
           end
 
@@ -527,18 +529,51 @@ defmodule PtcLlmHttp.Runtime.Guardian do
     causes = attempt.causes
 
     cond do
-      MapSet.member?(causes, :runtime_shutdown) -> {:discard, :runtime_shutdown}
-      MapSet.member?(causes, :caller_cancelled) -> :caller_cancelled
-      MapSet.member?(causes, :deadline_exceeded) -> {:discard, :deadline_exceeded}
-      MapSet.member?(causes, :consumer_halted) -> {:discard, :consumer_halted}
-      MapSet.member?(causes, :callback_misuse) -> {:discard, :callback_misuse}
-      MapSet.member?(causes, :resource_limit) -> {:discard, :resource_limit}
-      match?({_ref, :classified}, attempt.candidate) -> {:commit, elem(attempt.candidate, 0)}
-      MapSet.member?(causes, :internal_failure) -> {:discard, :internal_failure}
-      match?({_ref, :success}, attempt.candidate) -> {:commit, elem(attempt.candidate, 0)}
-      true -> {:discard, :internal_failure}
+      MapSet.member?(causes, :runtime_shutdown) ->
+        {:discard, :runtime_shutdown}
+
+      MapSet.member?(causes, :caller_cancelled) ->
+        :caller_cancelled
+
+      MapSet.member?(causes, :deadline_exceeded) ->
+        {:discard, :deadline_exceeded}
+
+      MapSet.member?(causes, :consumer_halted) and match?({_ref, :halted}, attempt.candidate) ->
+        {:commit, elem(attempt.candidate, 0)}
+
+      MapSet.member?(causes, :consumer_halted) ->
+        {:discard, :consumer_halted}
+
+      MapSet.member?(causes, :callback_misuse) ->
+        {:discard, :callback_misuse}
+
+      MapSet.member?(causes, :resource_limit) ->
+        {:discard, :resource_limit}
+
+      match?({_ref, :classified}, attempt.candidate) ->
+        {:commit, elem(attempt.candidate, 0)}
+
+      MapSet.member?(causes, :internal_failure) ->
+        {:discard, :internal_failure}
+
+      match?({_ref, :success}, attempt.candidate) ->
+        {:commit, elem(attempt.candidate, 0)}
+
+      true ->
+        {:discard, :internal_failure}
     end
   end
+
+  defp record_candidate(attempt, delivery_ref, :halted) do
+    %{
+      attempt
+      | candidate: {delivery_ref, :halted},
+        causes: MapSet.put(attempt.causes, :consumer_halted)
+    }
+  end
+
+  defp record_candidate(attempt, delivery_ref, category),
+    do: %{attempt | candidate: {delivery_ref, category}}
 
   defp notify_caller(_attempt_id, _attempt, :caller_cancelled), do: :ok
 
