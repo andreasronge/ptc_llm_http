@@ -20,6 +20,8 @@ defmodule PtcLlmHttp.Test.ColdHostnameBudgetProbe do
     Target
   }
 
+  alias PtcLlmHttp.Test.LoopbackPort
+
   @loopback_cidrs ["127.0.0.0/8", "::1/128"]
 
   def main do
@@ -99,10 +101,5 @@ defmodule PtcLlmHttp.Test.ColdHostnameBudgetProbe do
     deadline
   end
 
-  defp unused_loopback_port do
-    {:ok, socket} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false])
-    {:ok, {_address, port}} = :inet.sockname(socket)
-    :ok = :gen_tcp.close(socket)
-    port
-  end
+  defp unused_loopback_port, do: LoopbackPort.unused()
 end
