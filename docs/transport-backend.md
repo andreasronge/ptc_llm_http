@@ -222,3 +222,13 @@ role before the socket role starts. Deadline or caller cancellation kills the
 whole attempt tree, so no trust helper can detach or survive capacity release;
 later calls use OTP's cache. There is no fallback to unverified TLS and no
 environment lookup. Callers may supply DER-encoded authorities instead.
+
+On Ubuntu 24.04 / OTP 29.0.3, a spawned process that calls `cacerts_get/0`
+on a 146-certificate platform store is killed at about 393,000 words and
+survives at about 401,000. Hosts-file `localhost` resolution alone survives
+well below 30,000 words. The DNS role therefore needs a heap floor sized for
+trust load, not for `getaddrs` of `localhost`. `process-v2` grants 2,000,000
+words once the attempt aggregate reaches the 4,000,000-word hostname budget,
+which is the consumer-proven working DNS ceiling and leaves margin for the
+macOS CI store. A 5% slice of 4,000,000 words (200,000) is below that floor
+and is the cold-node failure reported against PtcLlmHttp 0.1.0.

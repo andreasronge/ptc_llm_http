@@ -15,8 +15,20 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   phase, scope, dispatch, HTTP status, and documented provider code, so
   consumers can classify without reading opaque struct keys.
 
+### Changed
+
+- `ResourceContract.current/0` is now `resource-v2`. It publishes the
+  `4_000_000`-word hostname-lookup aggregate beside the existing inclusive
+  process-budget range, and names the package-owned `process-v2` partition.
+
 ### Fixed
 
+- Cold HTTPS hostname attempts no longer die in the DNS role under the
+  documented `4_000_000`-word aggregate. `process-v2` grants that role a
+  `2_000_000`-word floor once the aggregate reaches the hostname budget and
+  rebalances the other roles inside the same total, so callers do not have to
+  inflate every ceiling to keep DNS alive. A fresh-OS/BEAM regression covers
+  cold and warm `localhost` resolution without a public network.
 - OpenAI-compatible text streams now accept OpenRouter's terminal usage event
   that repeats the already observed empty index-zero finish choice, in addition
   to the documented OpenAI `choices: []` usage chunk. The usage event is not

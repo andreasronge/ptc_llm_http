@@ -251,11 +251,12 @@ true = PtcLlmHttp.Runtime.ready?(runtime)
 
 The package exposes one data-only `PtcLlmHttp.ResourceContract.current/0`
 projection containing the resource-contract version, inclusive process-budget
-minimum/maximum, process-partition version, and runtime-control formula version.
-It exposes no role names, percentages, process IDs, or mutable counters. A pinned
-consumer uses this projection at build/integration validation instead of copying
-the numeric range as an independent source of truth; the detailed internal
-catalog remains package-owned.
+minimum/maximum, the hostname-lookup aggregate, process-partition version, and
+runtime-control formula version. It exposes no role names, percentages, process
+IDs, or mutable counters. A pinned consumer uses this projection at
+build/integration validation instead of copying the numeric range as an
+independent source of truth; the detailed internal catalog remains
+package-owned.
 
 The public runtime handle names a `:rest_for_one` `RuntimeRoot` with this exact
 child order: a permanent `RuntimeGuardian`, then a permanent
@@ -577,10 +578,14 @@ the remaining time from it; no phase resets the budget.
 `process_budget` is required. Its closed public constructor accepts only one
 aggregate `total_heap_words` value in the versioned inclusive package range
 `100_000..2_073_600_000`. Both endpoints are durable package contract data, not
-consumer assumptions. The package—not its consumers—versions and derives every
-internal role ceiling. Callers cannot name package roles, control their ratios,
-or disable the bound. A future range or partition change requires a new resource-
-contract version and an explicit consumer integration checkpoint.
+consumer assumptions. Hostname targets that use the system resolver and, for
+HTTPS, the platform trust store need at least the published hostname aggregate
+of `4_000_000` words; smaller legal aggregates remain valid for IP-literal
+targets and injected-resolver tests. The package—not its consumers—versions
+and derives every internal role ceiling. Callers cannot name package roles,
+control their ratios, or disable the bound. A future range or partition change
+requires a new resource-contract version and an explicit consumer integration
+checkpoint.
 
 `PtcLlmHttp.Deadline` is an opaque millisecond-based value constructed from an
 absolute `System.monotonic_time(:millisecond)` deadline. Public APIs do not mix
@@ -785,15 +790,20 @@ approved.
 | Explicit connect-policy CIDRs | 32 |
 | Non-secret static target headers | 32 |
 | Aggregate package process budget per attempt | 100,000–2,073,600,000 BEAM heap words |
-| Internal process-partition version | `process-v1` |
+| Hostname-lookup aggregate | 4,000,000 BEAM heap words |
+| Internal process-partition version | `process-v2` |
 | Attempt-tree supervisor role | 5% of aggregate heap words |
 | Coordinator role | 5% of aggregate heap words |
 | Sequential encode/decode role | 40% of aggregate heap words |
 | Callback role | 15% of aggregate heap words |
-| DNS role | 5% of aggregate heap words |
+| DNS role | 5% of aggregate heap words, and at least 2,000,000 words once the aggregate is at least the hostname budget |
 | Socket/TLS role | 20% of aggregate heap words |
 | Result/cause relay role | 10% of aggregate heap words |
 | Aggregate attempt cleanup cutoff | 1,000 milliseconds |
+
+When the DNS floor binds, the non-DNS roles keep those relative weights of
+`(aggregate − 2,000,000)` rather than of the full aggregate. Codec still
+receives the integer remainder of that leftover.
 
 Per-target request/response caps may only narrow the hard maximum. Individual
 prompt, content, schema, tool, argument, and error fields also need caps so one
@@ -802,17 +812,28 @@ validated after decode for depth, node count, expected object shape, and
 bounded strings. These post-decode checks are semantic bounds, not protection
 against allocation during decode.
 
-`process-v1` is package-owned and sums to exactly 100%. Integer rounding assigns
-the remainder to the codec role. At most one process in each role may be live;
-encode and decode reuse the sequential codec role. Every package-owned attempt
-supervisor, coordinator, encode/decode, callback, DNS, socket/TLS, and result/
-cause relay process sets `max_heap_size` with `kill: true` and
-`error_logger: false` before external data or caller code. The partition sum and
-one-live-process-per-role invariant make the total possible per-attempt package
-heap no greater than the caller's aggregate. Independently applying the
-aggregate to several processes is forbidden. Changing roles or percentages is a
-versioned package resource-contract change; PtcRunner depends only on aggregate
-semantics and rejects an unknown partition version at an integration checkpoint.
+`process-v2` is package-owned and sums to exactly 100%. Integer rounding assigns
+the remainder to the codec role. From the hostname aggregate of 4,000,000 words
+upward, the DNS role receives `max(5%, 2,000,000)` words so a cold system
+`getaddrs` plus platform `cacerts_get` survives on the supported OTP/OS matrix;
+the other roles keep their relative weights inside the leftover. That floor is
+the intended memory/security tradeoff: extra DNS room is taken from the other
+attempt roles rather than by multiplying every ceiling tenfold. At 1,024-way
+concurrency the hostname aggregate therefore exposes at most 4,096,000,000
+attempt-heap words plus the separate runtime-control heap. Below the hostname
+aggregate the original percentages remain, which is enough for IP-literal and
+injected-resolver calls and too small for a cold HTTPS hostname attempt.
+
+At most one process in each role may be live; encode and decode reuse the
+sequential codec role. Every package-owned attempt supervisor, coordinator,
+encode/decode, callback, DNS, socket/TLS, and result/cause relay process sets
+`max_heap_size` with `kill: true` and `error_logger: false` before external data
+or caller code. The partition sum and one-live-process-per-role invariant make
+the total possible per-attempt package heap no greater than the caller's
+aggregate. Independently applying the aggregate to several processes is
+forbidden. Changing roles or percentages is a versioned package resource-
+contract change; PtcRunner depends only on aggregate semantics and rejects an
+unknown partition version at an integration checkpoint.
 
 Each admitted attempt is a temporary fail-stop `AttemptTree` supervisor with a
 coordinator and its role children. The tree is `restart: :temporary` below the
@@ -1472,7 +1493,8 @@ and carry redacted `Inspect` implementations.
 - Added opaque target, credential, deadline, process-budget, and error values
   with sentinel redaction tests and exact external-input validation.
 - Published the data-only `resource-v1` and `error-base-v1` contracts, with the
-  package-owned `process-v1` and `runtime-control-v1` partitions.
+  package-owned `process-v1` and `runtime-control-v1` partitions. `resource-v2`
+  and `process-v2` later added the hostname aggregate and DNS-role floor.
 - Added the internal named limit catalog, current IANA-derived connect policy,
   literal-loopback restriction, bounded RFC 6750 bearer grammar, and exact URL
   path decoding rules.
