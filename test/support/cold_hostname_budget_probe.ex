@@ -10,15 +10,23 @@ defmodule PtcLlmHttp.Test.ColdHostnameBudgetProbe do
   # target then proves resolution still ends in the documented policy
   # rejection.
 
-  alias PtcLlmHttp.{Credential, Deadline, ProcessBudget, Request, Runtime, Target}
+  alias PtcLlmHttp.{
+    Credential,
+    Deadline,
+    ProcessBudget,
+    Request,
+    ResourceContract,
+    Runtime,
+    Target
+  }
 
-  @hostname_budget_words 4_000_000
   @loopback_cidrs ["127.0.0.0/8", "::1/128"]
 
   def main do
     {:ok, _} = Application.ensure_all_started(:ptc_llm_http)
     {:ok, runtime} = Runtime.start_link(max_concurrency: 1, groups: %{"group" => 1})
-    {:ok, budget} = ProcessBudget.new(total_heap_words: @hostname_budget_words)
+    hostname_words = ResourceContract.current().process_budget_heap_words.hostname
+    {:ok, budget} = ProcessBudget.new(total_heap_words: hostname_words)
     {:ok, request} = Request.new(messages: [%{role: :user, content: "ping"}])
     port = unused_loopback_port()
     allowed = hostname_target(port, {:allow_cidrs, @loopback_cidrs})

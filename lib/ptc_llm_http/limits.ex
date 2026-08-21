@@ -45,6 +45,9 @@ defmodule PtcLlmHttp.Limits do
   @connect_policy_cidrs 32
   @process_budget_min 100_000
   @process_budget_max 2_073_600_000
+  @process_budget_hostname 4_000_000
+  @dns_role_heap_floor 2_000_000
+  @non_dns_partition_percent 95
   @cleanup_milliseconds 1_000
   @cooperative_cleanup_milliseconds 900
   @maximum_timer_milliseconds 4_294_967_295
@@ -93,6 +96,8 @@ defmodule PtcLlmHttp.Limits do
   def connect_policy_cidrs, do: @connect_policy_cidrs
   def process_budget_min, do: @process_budget_min
   def process_budget_max, do: @process_budget_max
+  def process_budget_hostname, do: @process_budget_hostname
+  def dns_role_heap_floor, do: @dns_role_heap_floor
   def cleanup_milliseconds, do: @cleanup_milliseconds
   def cooperative_cleanup_milliseconds, do: @cooperative_cleanup_milliseconds
   def maximum_timer_milliseconds, do: @maximum_timer_milliseconds
@@ -122,6 +127,16 @@ defmodule PtcLlmHttp.Limits do
   end
 
   def attempt_partition(total_words) do
+    partition = percentage_attempt_partition(total_words)
+
+    if total_words >= @process_budget_hostname and partition.dns < @dns_role_heap_floor do
+      floored_dns_attempt_partition(total_words)
+    else
+      partition
+    end
+  end
+
+  defp percentage_attempt_partition(total_words) do
     attempt_tree = div(total_words * 5, 100)
     coordinator = div(total_words * 5, 100)
     callback = div(total_words * 15, 100)
@@ -137,6 +152,26 @@ defmodule PtcLlmHttp.Limits do
       codec: codec,
       callback: callback,
       dns: dns,
+      socket: socket,
+      relay: relay
+    }
+  end
+
+  defp floored_dns_attempt_partition(total_words) do
+    rest = total_words - @dns_role_heap_floor
+    attempt_tree = div(rest * 5, @non_dns_partition_percent)
+    coordinator = div(rest * 5, @non_dns_partition_percent)
+    callback = div(rest * 15, @non_dns_partition_percent)
+    socket = div(rest * 20, @non_dns_partition_percent)
+    relay = div(rest * 10, @non_dns_partition_percent)
+    codec = rest - attempt_tree - coordinator - callback - socket - relay
+
+    %{
+      attempt_tree: attempt_tree,
+      coordinator: coordinator,
+      codec: codec,
+      callback: callback,
+      dns: @dns_role_heap_floor,
       socket: socket,
       relay: relay
     }

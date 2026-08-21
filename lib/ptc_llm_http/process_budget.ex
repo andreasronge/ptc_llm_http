@@ -4,6 +4,27 @@ defmodule PtcLlmHttp.ProcessBudget do
 
   Callers choose only the inclusive aggregate. The package owns and versions
   the internal role partition, and no role bound can be disabled.
+
+  The constructor accepts `100_000..2_073_600_000` heap words. That full
+  range remains valid for IP-literal targets and for tests that inject a
+  resolver and trust material. Hostname targets that use the system resolver
+  and, for HTTPS, OTP's platform trust store need at least `4_000_000` words.
+  That hostname aggregate is published on `PtcLlmHttp.ResourceContract.current/0`.
+
+  Below the hostname aggregate, a cold `getaddrs` plus `cacerts_get` can kill
+  the DNS role even though the constructor accepted the budget. From the
+  hostname aggregate upward, the package-owned partition grants the DNS role a
+  measured floor large enough for that cold load on the supported OTP/OS
+  matrix and rebalances the remaining roles inside the same total. Raising the
+  aggregate further grows those other roles; DNS stays at least at the floor
+  and follows its percentage once that percentage exceeds the floor.
+
+  The intended tradeoff is that the extra DNS room is taken from the other
+  attempt roles rather than by multiplying every ceiling. Per-attempt package
+  heap therefore remains the caller's aggregate. At the runtime maximum of
+  1,024 concurrent attempts, one thousand twenty-four hostname calls expose at
+  most `4_096_000_000` attempt-heap words plus the separate runtime-control
+  heap.
   """
 
   alias PtcLlmHttp.{Error, Limits}

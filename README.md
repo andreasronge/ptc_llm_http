@@ -45,9 +45,11 @@ decides to try again.
 
 Construct a validated `PtcLlmHttp.Target`, `PtcLlmHttp.Request`, absolute
 `PtcLlmHttp.Deadline`, call-local `PtcLlmHttp.Credential`, and aggregate
-`PtcLlmHttp.ProcessBudget`, then call `PtcLlmHttp.call/4`. Successful content
-and usage are available through explicit redacted-value accessors. Expected
-wire and provider failures return the closed facts in
+`PtcLlmHttp.ProcessBudget`, then call `PtcLlmHttp.call/4`. Hostname targets
+that use the system resolver need the published hostname aggregate of
+`4_000_000` heap words; see `PtcLlmHttp.ResourceContract.current/0`.
+Successful content and usage are available through explicit redacted-value
+accessors. Expected wire and provider failures return the closed facts in
 `PtcLlmHttp.Error.contract/0`; raw provider text is never returned.
 
 Requests can declare bounded strict function tools, replay assistant tool calls,

@@ -1,7 +1,7 @@
 defmodule PtcLlmHttp.ValueContractsTest do
   use ExUnit.Case, async: true
 
-  alias PtcLlmHttp.{Credential, Deadline, Error, ProcessBudget, ResourceContract}
+  alias PtcLlmHttp.{Credential, Deadline, Error, Limits, ProcessBudget, ResourceContract}
 
   describe "Credential" do
     test "accepts no credential and bounded RFC 6750 bearer tokens" do
@@ -72,14 +72,60 @@ defmodule PtcLlmHttp.ValueContractsTest do
 
     test "publishes only stable integration facts" do
       assert ResourceContract.current() == %{
-               version: "resource-v1",
-               process_budget_heap_words: %{minimum: 100_000, maximum: 2_073_600_000},
-               process_partition_version: "process-v1",
+               version: "resource-v2",
+               process_budget_heap_words: %{
+                 minimum: 100_000,
+                 maximum: 2_073_600_000,
+                 hostname: 4_000_000
+               },
+               process_partition_version: "process-v2",
                runtime_control_formula_version: "runtime-control-v1"
              }
 
       refute inspect(ResourceContract.current()) =~ "socket"
       refute inspect(ResourceContract.current()) =~ "coordinator"
+    end
+
+    test "the hostname aggregate grants the DNS role its measured floor" do
+      assert {:ok, budget} = ProcessBudget.new(total_heap_words: 4_000_000)
+      partition = ProcessBudget.partition(budget)
+
+      assert partition.dns == 2_000_000
+      assert Enum.sum(Map.values(partition)) == 4_000_000
+      assert Enum.all?(Map.values(partition), &(&1 > 0))
+    end
+
+    test "aggregates below the hostname budget keep the percentage partition" do
+      assert {:ok, budget} = ProcessBudget.new(total_heap_words: 3_999_999)
+      partition = ProcessBudget.partition(budget)
+
+      assert partition.dns == 199_999
+      assert Enum.sum(Map.values(partition)) == 3_999_999
+    end
+
+    test "the DNS floor does not outgrow its percentage once that share is larger" do
+      assert {:ok, budget} = ProcessBudget.new(total_heap_words: 50_000_000)
+      partition = ProcessBudget.partition(budget)
+
+      assert partition.dns == 2_500_000
+      assert Enum.sum(Map.values(partition)) == 50_000_000
+    end
+
+    test "every catalog aggregate keeps positive roles that sum to the total" do
+      totals = [100_000, 100_003, 1_000_000, 3_999_999, 4_000_000, 40_000_000, 2_073_600_000]
+
+      Enum.each(totals, fn total ->
+        assert {:ok, budget} = ProcessBudget.new(total_heap_words: total)
+        partition = ProcessBudget.partition(budget)
+
+        assert Enum.sum(Map.values(partition)) == total
+        assert Enum.all?(Map.values(partition), &(&1 > 0))
+      end)
+    end
+
+    test "maximum concurrency times the hostname budget is the attempt-heap exposure" do
+      hostname = 4_000_000
+      assert Limits.max_concurrency() * hostname == 4_096_000_000
     end
   end
 
