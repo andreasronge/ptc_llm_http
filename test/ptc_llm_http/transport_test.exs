@@ -5,6 +5,8 @@ defmodule PtcLlmHttp.TransportTest do
   alias PtcLlmHttp.Http.{Request, Response}
   alias PtcLlmHttp.Test.{Certificates, RawServer}
 
+  import PtcLlmHttp.Test.Fragmentation, only: [fragment: 2]
+
   test "one admitted TCP attempt sends one exact request and parses a short keep-alive response" do
     server = start_supervised!({RawServer, [transport: :tcp]})
     runtime = runtime()
@@ -368,17 +370,5 @@ defmodule PtcLlmHttp.TransportTest do
     {:ok, {_address, port}} = :inet.sockname(socket)
     :ok = :gen_tcp.close(socket)
     port
-  end
-
-  defp fragment(binary, sizes), do: fragment(binary, sizes, sizes, [])
-  defp fragment(<<>>, _sizes, _original, fragments), do: Enum.reverse(fragments)
-
-  defp fragment(binary, [], original, fragments),
-    do: fragment(binary, original, original, fragments)
-
-  defp fragment(binary, [size | sizes], original, fragments) do
-    take = min(size, byte_size(binary))
-    <<fragment::binary-size(^take), rest::binary>> = binary
-    fragment(rest, sizes, original, [fragment | fragments])
   end
 end
