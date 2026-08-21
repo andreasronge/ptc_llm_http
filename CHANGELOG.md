@@ -9,6 +9,12 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
 
 ## [Unreleased]
 
+### Added
+
+- `PtcLlmHttp.Error.facts/1`, a public closed instance projection of kind,
+  phase, scope, dispatch, HTTP status, and documented provider code, so
+  consumers can classify without reading opaque struct keys.
+
 ### Fixed
 
 - OpenAI-compatible text streams now accept OpenRouter's terminal usage event
