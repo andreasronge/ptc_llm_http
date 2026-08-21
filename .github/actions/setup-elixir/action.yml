@@ -24,7 +24,7 @@ runs:
   steps:
     - name: Set up Elixir
       id: setup-beam
-      uses: erlef/setup-beam@v1
+      uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
       with:
         elixir-version: ${{ inputs.elixir-version }}
         otp-version: ${{ inputs.otp-version }}
@@ -34,7 +34,7 @@ runs:
     # dependency versions is not reusable, and a stale restore is worse than a
     # cold one because it fails somewhere far from its cause.
     - name: Cache deps and _build
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: |
           deps
@@ -45,7 +45,7 @@ runs:
 
     - name: Cache Dialyzer PLT
       if: inputs.cache-plt == 'true'
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: priv/plts
         key: plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}

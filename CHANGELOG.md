@@ -61,6 +61,9 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   scripts under `scripts/ci/` and shared by the Git hooks and GitHub Actions.
 - GitHub Actions workflow: quality, tests on Linux and macOS, Dialyzer, docs,
   and release/package verification on the supported toolchain.
+- Protected, main-only Hex dry-run and publication automation with exact
+  version/tag checks, step-scoped credentials, immutable third-party actions,
+  and the complete release gate.
 - The reserved public namespace `PtcLlmHttp` and its OTP application.
 
 ### Changed
