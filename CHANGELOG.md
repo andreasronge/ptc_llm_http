@@ -56,15 +56,15 @@ minor bump; consumers pin an exact tag or Git revision rather than a range.
   StreamData, and usage-rules tooling.
 - Repository-owned gates `mix check` and `mix full_check`, implemented as
   scripts under `scripts/ci/` and shared by the Git hooks and GitHub Actions.
-- GitHub Actions workflow: quality, tests on Linux and macOS, minimum
-  Elixir/OTP compatibility, Dialyzer, docs, and release/package verification.
+- GitHub Actions workflow: quality, tests on Linux and macOS, Dialyzer, docs,
+  and release/package verification on the supported toolchain.
 - The reserved public namespace `PtcLlmHttp` and its OTP application.
 
 ### Changed
 
-- Erlang/OTP 26 is now the declared and enforced minimum, established by the
-  socket/TLS spike rather than assumed. The compatibility job runs the whole
-  suite on it.
+- Elixir 1.20 and Erlang/OTP 29 are now the declared and enforced minimums,
+  matching the only consumer and the development/CI baseline. Earlier OTP
+  releases remain transport-spike evidence but are not supported runtimes.
 
 ### Fixed
 

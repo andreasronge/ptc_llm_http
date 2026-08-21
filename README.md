@@ -60,11 +60,11 @@ validated locally and returned as deterministic canonical JSON.
 
 ## Requirements
 
-Elixir `~> 1.15` and Erlang/OTP 26 or later. The OTP floor is what the bounded
-socket and TLS behavior needs, not a preference — see
+Elixir `~> 1.20` and Erlang/OTP 29 or later. This is the supported consumer and
+development baseline; earlier OTP measurements remain documented in
 [docs/transport-backend.md](https://github.com/andreasronge/ptc_llm_http/blob/main/docs/transport-backend.md)
-— and CI runs the transport suite on it. Development uses the toolchain pinned
-in `mise.toml`.
+as historical transport evidence. CI runs the complete suite on OTP 29 on Linux
+and macOS.
 
 ## Development
 

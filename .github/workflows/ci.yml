@@ -52,47 +52,6 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: scripts/ci/tests.sh
 
-  # Verifies the Elixir version the package *declares*, on the package's real
-  # consumer surface: only runtime dependencies are fetched, so no dev or test
-  # tooling can mask an incompatible library. Tests cannot run here -- the lint
-  # and property tooling needs a newer Elixir than the declaration -- which is
-  # what the `compat` job below is for.
-  declared-minimum:
-    name: Declared minimum Elixir compiles
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: '1.15.8'
-          otp-version: '26.2.5'
-      - run: scripts/ci/minimum-elixir.sh
-
-  # The declared OTP floor, running the whole suite.
-  #
-  # `mix.exs` requires OTP 26 or later, established by the socket/TLS spike and
-  # explained in docs/transport-backend.md. This job is where that claim is
-  # tested rather than asserted: the transport conformance suite runs here, so
-  # a socket or TLS behavior that differs on the oldest supported release fails
-  # the build. The Elixir version is the oldest the lint and property tooling
-  # supports, which is above the declared `elixir: "~> 1.15"`; the
-  # `declared-minimum` job covers that end.
-  #
-  # ubuntu-22.04 is deliberate -- precompiled OTP 26 builds are published for
-  # it, not for 24.04.
-  compat:
-    name: Minimum supported OTP
-    runs-on: ubuntu-22.04
-    env:
-      MIX_ENV: test
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-elixir
-        with:
-          elixir-version: '1.18.4'
-          otp-version: '26.2.5'
-      - run: scripts/ci/tests.sh --include compat
-
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-24.04

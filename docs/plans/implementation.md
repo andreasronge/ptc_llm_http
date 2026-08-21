@@ -3,11 +3,12 @@
 **Status:** active implementation plan; cross-project review incorporated
 2026-08-20. Slice 0 infrastructure and the reserved public namespace landed in
 `bae77e0` with follow-up CI/tooling commits through `cebdd8f`. Slice 1 passed
-the socket/TLS feasibility gate: the backend is pure OTP, the minimum release
-is OTP 26, and the trust source is OTP's in-memory platform store. Slices 2
-through 5 added the validated call contracts, fail-stop admission runtime,
-bounded HTTP/1 core, and independently usable OpenAI-compatible text, tool, and
-strict structured-output calls. Streaming remains for Slice 6.
+the socket/TLS feasibility gate: the backend is pure OTP and the trust source
+is OTP's in-memory platform store. The package and its only consumer now use
+Elixir 1.20 / OTP 29 as their supported baseline. Slices 2 through 5 added the
+validated call contracts, fail-stop admission runtime, bounded HTTP/1 core,
+and independently usable OpenAI-compatible text, tool, and strict structured-
+output calls. Streaming remains for Slice 6.
 
 ## Goal
 
@@ -58,7 +59,7 @@ The project is successful when:
    inspection cannot disclose secrets, private endpoints, prompts, or model
    output;
 8. the warm local gate is small enough for normal per-commit use, with slow
-   compatibility and Dialyzer work left to CI or an explicit full gate; and
+   Dialyzer and release work left to CI or an explicit full gate; and
 9. PtcRunner can pin one immutable package revision and remove ReqLLM without
    copying this implementation into its own modules.
 
@@ -95,11 +96,10 @@ adapter is intentionally thin and remains in PtcRunner.
   or Git commit during pre-release integration and never follows a moving
   branch. Its published production package requires a published Hex version of
   `ptc_llm_http`.
-- Elixir declaration matches PtcRunner's `~> 1.15`. The minimum release is
-  Erlang/OTP 26, established by the transport spike from the `:ssl` and
-  `:gen_tcp` behavior the bounded read and handshake contract requires, and
-  enforced in `mix.exs`. CI runs the transport suite on that floor and on
-  PtcRunner's current Elixir 1.20.2 / OTP 29.0.3 environment.
+- The package and its only consumer share one supported baseline: Elixir
+  `~> 1.20` and Erlang/OTP 29 or later, enforced in `mix.exs`. The transport
+  spike's OTP 26/27 measurements remain retained evidence, not a compatibility
+  promise. CI runs the supported toolchain on Linux and macOS.
 - Runtime dependencies stay minimal. `Jason` is allowed for JSON. Req, Finch,
   Mint, an HTTP server, a model database, and a provider SDK are not runtime
   dependencies.
@@ -1258,7 +1258,7 @@ push path. Its own gates must stay proportionate.
 - compilation with warnings as errors;
 - Credo on changed production code or the full small tree;
 - unit, parser, codec, and local integration tests excluding explicitly tagged
-  compatibility/release tests; and
+  release tests; and
 - generated-fixture staleness check if generators are introduced.
 
 Target: comfortably under one minute warm on the maintainer machine. Do not
@@ -1270,7 +1270,7 @@ documented.
 
 - everything in `mix check`;
 - Dialyzer;
-- minimum/current Elixir-OTP compatibility matrix locally where available;
+- supported Elixir/OTP toolchain checks;
 - raw TLS and minimal-release smoke;
 - docs with warnings as errors;
 - dependency/license audit; and
@@ -1285,7 +1285,7 @@ project's purpose. A release always requires the complete CI result.
 Use independent jobs with cancellation for superseded PR runs:
 
 - format/compile/Credo/unit/property tests on Linux current toolchain;
-- minimum supported Elixir/OTP compatibility;
+- supported Elixir/OTP tests on Linux;
 - macOS current toolchain for socket/TLS behavior;
 - Dialyzer with cache;
 - minimal release/package verification; and
@@ -1424,9 +1424,10 @@ versions the HTTP/provider partitions.
 - Proved the handshake bounds against generated chains: `depth` rejects an
   over-long chain, and `max(16 KiB, max_handshake_size)` rejects a 200 KiB
   certificate while admitting a 20 KiB one.
-- Fixed the minimum release at OTP 26 and the trust source at
-  `:public_key.cacerts_get/0`; both are recorded in
-  `docs/transport-backend.md`, enforced in `mix.exs`, and exercised by CI.
+- Established OTP 26 as the technical feasibility floor and selected
+  `:public_key.cacerts_get/0` as the trust source. The retained transport record
+  documents those measurements; the later package support policy intentionally
+  standardizes on OTP 29.
 - Deferred per-role heap ceilings to Slice 2 with the measurements and the two
   hazards that make them a runtime-wide decision rather than a socket option.
 - Left one residual for Slice 2: closing a TLS socket does not wait for the
@@ -1436,9 +1437,10 @@ versions the HTTP/provider partitions.
   owns attempt processes, where killing the owner already closes the socket
   immediately.
 
-Exit met: the backend contract holds on macOS locally and on Linux, macOS, and
-the minimum OTP in CI. No public API and no HTTP request exists yet; the
-backends are internal and carry redacted `Inspect` implementations.
+Exit met: the backend contract held on macOS locally and on the spike's Linux/
+OTP matrix. Current CI exercises the supported OTP 29 baseline on Linux and
+macOS. No public API and no HTTP request exists yet; the backends are internal
+and carry redacted `Inspect` implementations.
 
 ### Slice 2 — target, credential, deadline, and admission runtime — complete
 
@@ -1526,7 +1528,7 @@ performed from this repository.
   overflow coverage. PtcRunner parity remains a pinned consumer checkpoint and
   is intentionally not performed from this repository.
 - Verification on 2026-08-21: `mix check` completed in 18.38 seconds; the full
-  compatibility, audit, minimum-runtime, Dialyzer, docs, release-smoke, and
+  supported-toolchain, audit, minimum-runtime, Dialyzer, docs, release-smoke, and
   package gate (`mix full_check`) completed in 97.58 seconds.
 
 Exit met in this package: non-streaming tool and structured-output capability

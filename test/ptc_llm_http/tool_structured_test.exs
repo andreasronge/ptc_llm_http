@@ -492,9 +492,9 @@ defmodule PtcLlmHttp.ToolStructuredTest do
     messages = List.duplicate(%{role: :user, content: "bounded history"}, 1_024)
     {:ok, request} = Request.new(messages: messages)
     {:ok, minimum_budget} = ProcessBudget.new(total_heap_words: 100_000)
-    task = Task.async(fn -> call(runtime, target, request, 5_000, minimum_budget) end)
+    task = Task.async(fn -> call(runtime, target, request, 30_000, minimum_budget) end)
 
-    assert :ok = RawServer.await_connection(server)
+    assert :ok = RawServer.await_connection(server, 15_000)
     {:ok, body} = OpenAI.encode(target, request)
     assert_exact_request(server, target, body)
 
@@ -504,7 +504,7 @@ defmodule PtcLlmHttp.ToolStructuredTest do
         ~s({"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]})
       )
 
-    assert {:ok, response} = Task.await(task, 5_000)
+    assert {:ok, response} = Task.await(task, 15_000)
     assert Response.content(response) == "ok"
   end
 

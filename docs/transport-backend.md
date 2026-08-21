@@ -10,12 +10,12 @@ re-run in full on Linux with OTP 26.2.5 and OTP 27.3.4.
 Two kinds of row appear below, and the difference matters. Rows marked
 **(tested)** describe this package's own behavior and are assertions in
 `test/ptc_llm_http/transport/`, which CI runs on Linux and macOS and, through
-the compatibility job, on the declared minimum OTP. Unmarked rows characterize
-OTP itself — what a rejected API does, what a different setting would have
-allowed, how much a connection process held. They were measured once, during
-the spike, and are recorded because they are why the contract is what it is.
-They are not re-run, and a future OTP could move them; if one ever needs to be
-depended on, it needs a test first.
+the shared setup action, on the declared OTP 29 baseline. Unmarked rows
+characterize OTP itself — what a rejected API does, what a different setting
+would have allowed, how much a connection process held. They were measured
+once, during the spike, and are recorded because they are why the contract is
+what it is. They are not re-run, and a future OTP could move them; if one ever
+needs to be depended on, it needs a test first.
 
 ## The contract
 
@@ -175,8 +175,8 @@ A per-connection-process heap ceiling through `receiver_spawn_opts` was
 measured and deliberately not shipped:
 
 - it bounds the term heap, not the reference-counted binaries a response
-  actually lives in — counting those needs `include_shared_binaries`, which
-  arrived in OTP 28, above the declared minimum;
+  actually lives in — `include_shared_binaries` can measure those binaries,
+  but a process heap ceiling still cannot bound them;
 - a ceiling below what the connection process needs to start kills it while the
   caller is still linked during start-up, hanging the caller rather than
   failing it; and
@@ -190,13 +190,13 @@ Kernel socket buffers are also outside this bound. They hold bytes the BEAM has
 not copied and that TCP flow control eventually stops; the caps here are about
 what enters the VM.
 
-## Minimum Erlang/OTP: 26
+## Supported Erlang/OTP baseline: 29
 
-Fixed by this spike and enforced in `mix.exs`. It is the oldest release that
-carries everything the transport requires — `:public_key.cacerts_get/0` for
-in-memory trust (OTP 25), the TLS 1.3 client, and the bounded-handshake options
-above — and it is the oldest pair CI actually runs the suite on. Elixir stays
-at `~> 1.15`.
+The spike established that OTP 26 carried the primitives the transport needs,
+but technical feasibility is not the support policy. The package and its only
+consumer now standardize on OTP 29 and Elixir `~> 1.20`, enforced in `mix.exs`
+and exercised on Linux and macOS in CI. OTP 26 and 27 measurements above remain
+historical evidence; those releases are not supported runtimes.
 
 ## Trust source
 
