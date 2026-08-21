@@ -21,7 +21,7 @@ env:
 
 jobs:
   quality:
-    name: Format, compile, Credo
+    name: Format, compile, Credo, duplication
     runs-on: ubuntu-24.04
     env:
       MIX_ENV: test

@@ -12,6 +12,9 @@
 # Where third-party dependencies like ExDoc output generated docs.
 /doc/
 
+# Machine-local ExDNA result caches.
+.ex_dna_cache*
+
 # Temporary files, for example, from tests.
 /tmp/
 

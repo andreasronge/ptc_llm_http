@@ -1266,6 +1266,7 @@ push path. Its own gates must stay proportionate.
 - formatting check;
 - compilation with warnings as errors;
 - Credo on changed production code or the full small tree;
+- an ExDNA type-I/type-II duplication ratchet over `lib/` and `test/`;
 - unit, parser, codec, and local integration tests excluding explicitly tagged
   release tests; and
 - generated-fixture staleness check if generators are introduced.

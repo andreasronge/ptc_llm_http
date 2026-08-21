@@ -50,6 +50,10 @@ change.
 ## Code rules
 
 - **One module per file**, named after the file.
+- Do not copy a helper into another module to avoid an import. `mix check`
+  rejects duplication absent from `.duplication-baseline.json`; extract shared
+  policy, or suppress deliberate repetition with a reason. See
+  `docs/maintainers/duplication-gate.md`.
 - **Redaction before use.** Target, credential, request, response, error,
   tool-call, and stream-state structs get a redacted `Inspect` implementation,
   with a test asserting the sentinel, in the same commit that introduces the
@@ -99,8 +103,8 @@ small by moving *platform* work out, not by dropping coverage.
 ## Commands
 
 - `mix check` — per-commit gate: lock check, format, compile with warnings as
-  errors, compile-cycle check, Credo, and the test suite. Target: comfortably
-  under a minute warm. Run before every commit.
+  errors, compile-cycle check, Credo, duplication ratchet, and the test suite.
+  Target: comfortably under a minute warm. Run before every commit.
 - `mix full_check` — everything in `mix check`, plus the `:release` tests,
   dependency audit, the runtime-dependency check
   (`scripts/ci/minimum-elixir.sh`: the library must compile with only its

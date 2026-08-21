@@ -11,3 +11,4 @@ mix compile --warnings-as-errors
 mix format --check-formatted
 mix xref graph --format cycles --label compile-connected --fail-above 0
 mix credo --strict
+scripts/duplication_gate.sh check
