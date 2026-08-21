@@ -10,12 +10,22 @@ defmodule PtcLlmHttp.Http.Request do
   @spec encode(Target.t(), Credential.t(), [binary()], binary()) ::
           {:ok, binary(), binary(), non_neg_integer()} | {:error, atom()}
   def encode(target, credential, operation_segments, body)
-      when is_list(operation_segments) and is_binary(body) do
+      when is_list(operation_segments) and is_binary(body),
+      do: encode(target, credential, operation_segments, body, :json)
+
+  def encode(_target, _credential, _operation_segments, _body),
+    do: {:error, :invalid_request}
+
+  @spec encode(Target.t(), Credential.t(), [binary()], binary(), :json | :event_stream) ::
+          {:ok, binary(), binary(), non_neg_integer()} | {:error, atom()}
+  def encode(target, credential, operation_segments, body, response_type)
+      when is_list(operation_segments) and is_binary(body) and
+             response_type in [:json, :event_stream] do
     authority = Target.authority(target)
 
     with true <- byte_size(body) <= Target.max_encoded_request_bytes(target),
          {:ok, request_target} <- request_target(authority.path_segments, operation_segments),
-         {:ok, fields} <- fields(authority, credential, byte_size(body)),
+         {:ok, fields} <- fields(authority, credential, byte_size(body), response_type),
          true <- length(fields) <= Limits.request_header_fields(),
          {:ok, head} <- head(request_target, fields),
          true <- byte_size(head) <= Limits.request_head_bytes() do
@@ -25,7 +35,7 @@ defmodule PtcLlmHttp.Http.Request do
     end
   end
 
-  def encode(_target, _credential, _operation_segments, _body),
+  def encode(_target, _credential, _operation_segments, _body, _response_type),
     do: {:error, :invalid_request}
 
   defp request_target(base_segments, operation_segments) do
@@ -65,11 +75,13 @@ defmodule PtcLlmHttp.Http.Request do
     <<"%", :binary.at(digits, div(byte, 16)), :binary.at(digits, rem(byte, 16))>>
   end
 
-  defp fields(authority, credential, content_length) do
+  defp fields(authority, credential, content_length, response_type) do
+    accept = if response_type == :event_stream, do: "text/event-stream", else: "application/json"
+
     base = [
       {"Host", host(authority)},
       {"Content-Type", "application/json"},
-      {"Accept", "application/json"},
+      {"Accept", accept},
       {"Accept-Encoding", "identity"},
       {"Connection", "close"},
       {"User-Agent", @user_agent},

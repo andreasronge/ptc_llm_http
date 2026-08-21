@@ -16,6 +16,20 @@ defmodule PtcLlmHttp.Runtime.Role do
   def run(role, coordinator, operation_ref, operation),
     do: GenServer.cast(role, {:run, coordinator, operation_ref, operation})
 
+  def call(role, operation) when is_pid(role) and is_function(operation, 0) do
+    GenServer.call(role, {:call, operation}, :infinity)
+  catch
+    :exit, _role_unavailable -> {:failure, :internal_failure}
+  end
+
+  @impl GenServer
+  def handle_call({:call, operation}, _from, %{running: false} = state) do
+    {:reply, invoke(operation), state}
+  end
+
+  def handle_call({:call, _operation}, _from, state),
+    do: {:reply, {:failure, :internal_failure}, state}
+
   @impl GenServer
   def handle_cast({:run, coordinator, operation_ref, operation}, %{running: false} = state) do
     result = invoke(operation)

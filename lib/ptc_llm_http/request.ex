@@ -1,6 +1,6 @@
 defmodule PtcLlmHttp.Request do
   @moduledoc """
-  Validated provider-neutral non-streaming request.
+  Validated provider-neutral request for bounded calls and text streams.
 
   Requests may contain text messages, strict function tools, assistant tool-call
   replay, tool results, and one strict structured-output schema. Inspection is
@@ -45,7 +45,7 @@ defmodule PtcLlmHttp.Request do
     :cache
   ]
 
-  @doc "Validates a bounded non-streaming request without model or transport options."
+  @doc "Validates a bounded request without model or transport options."
   @spec new(keyword()) :: {:ok, t()} | {:error, Error.t()}
   def new(options) when is_list(options) do
     with :ok <- options(options),

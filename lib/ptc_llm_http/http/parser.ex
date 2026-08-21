@@ -39,6 +39,34 @@ defmodule PtcLlmHttp.Http.Parser do
     parse_head(state, 0, 0)
   end
 
+  @spec parse_stream(
+          module(),
+          struct(),
+          integer(),
+          pos_integer(),
+          (atom(), atom() -> any()),
+          term(),
+          (binary(), term() -> {:cont | :halt, term()} | {:error, atom()})
+        ) ::
+          {:ok, {:stream, :complete | :halted, term(), map()}, struct()}
+          | {:ok, {:response, Response.t()}, struct()}
+          | {:error, reason() | atom(), struct()}
+  def parse_stream(backend, socket, deadline, maximum_body_bytes, progress, accumulator, consumer)
+      when is_atom(backend) and is_struct(socket) and is_integer(deadline) and
+             is_integer(maximum_body_bytes) and maximum_body_bytes > 0 and
+             is_function(progress, 2) and is_function(consumer, 2) do
+    state = %{
+      backend: backend,
+      socket: socket,
+      deadline: deadline,
+      buffer: <<>>,
+      maximum_body_bytes: maximum_body_bytes,
+      progress: progress
+    }
+
+    parse_stream_head(state, 0, 0, accumulator, consumer)
+  end
+
   defp parse_head(state, informational, head_bytes) do
     with {:ok, status_line, state, status_bytes} <-
            read_line(
@@ -60,6 +88,158 @@ defmodule PtcLlmHttp.Http.Parser do
     else
       {:error, reason, failed_state} -> {:error, reason, failed_state.socket}
       {:error, reason} -> {:error, reason, state.socket}
+    end
+  end
+
+  defp parse_stream_head(state, informational, head_bytes, accumulator, consumer) do
+    with {:ok, status_line, state, status_bytes} <-
+           read_line(
+             state,
+             Limits.response_line_bytes(),
+             Limits.response_head_bytes() - head_bytes,
+             state.maximum_body_bytes
+           ),
+         {:ok, status} <- parse_status_line(status_line),
+         {:ok, headers, state, header_bytes} <-
+           read_headers(state, %{}, 0, head_bytes + status_bytes) do
+      complete_or_continue_stream(
+        state,
+        status,
+        headers,
+        informational,
+        head_bytes + status_bytes + header_bytes,
+        accumulator,
+        consumer
+      )
+    else
+      {:error, reason, failed_state} -> {:error, reason, failed_state.socket}
+      {:error, reason} -> {:error, reason, state.socket}
+    end
+  end
+
+  defp complete_or_continue_stream(
+         state,
+         status,
+         headers,
+         informational,
+         head_bytes,
+         accumulator,
+         consumer
+       )
+       when status in 100..199 do
+    next = informational + 1
+
+    cond do
+      status == 101 ->
+        {:error, :unsupported_framing, state.socket}
+
+      next > Limits.informational_responses() ->
+        {:error, :malformed_http, state.socket}
+
+      field_values(headers, "content-length") != [] ->
+        {:error, :malformed_http, state.socket}
+
+      field_values(headers, "transfer-encoding") != [] ->
+        {:error, :unsupported_transfer_encoding, state.socket}
+
+      true ->
+        parse_stream_head(state, next, head_bytes, accumulator, consumer)
+    end
+  end
+
+  defp complete_or_continue_stream(
+         state,
+         status,
+         headers,
+         informational,
+         _head_bytes,
+         accumulator,
+         consumer
+       ) do
+    with :ok <- final_status(status),
+         :ok <- content_encoding(headers),
+         :ok <- no_upgrade(headers),
+         {:ok, content_type} <- single_value(headers, "content-type"),
+         {:ok, framing} <- framing(status, headers),
+         :ok <- state.progress.(:receive_body, :possibly_sent) do
+      if status in 200..299 do
+        case stream_content_type(content_type) do
+          :ok ->
+            stream_body(
+              state,
+              framing,
+              accumulator,
+              consumer,
+              status,
+              content_type,
+              informational
+            )
+
+          {:error, reason} ->
+            stream_error(reason, status, state.socket)
+        end
+      else
+        buffered_body(state, framing, status, content_type, informational)
+      end
+    else
+      {:error, reason, failed_state} -> {:error, reason, failed_state.socket}
+      {:error, reason} -> {:error, reason, state.socket}
+    end
+  end
+
+  defp buffered_body(state, framing, status, content_type, informational) do
+    case read_body(state, framing) do
+      {:ok, body, trailer_fields, state} ->
+        response = %Response{
+          status: status,
+          body: body,
+          content_type: content_type,
+          wire_bytes: byte_size(body),
+          informational_responses: informational,
+          trailer_fields: trailer_fields
+        }
+
+        {:ok, {:response, response}, state.socket}
+
+      {:error, reason, failed_state} ->
+        {:error, reason, failed_state.socket}
+    end
+  end
+
+  defp stream_error(reason, status, socket)
+       when reason in [:malformed_stream, :stream_too_large, :callback_misuse, :internal_failure],
+       do: {:error, {:stream, reason, status}, socket}
+
+  defp stream_error(reason, _status, socket), do: {:error, reason, socket}
+
+  defp stream_content_type(value) when is_binary(value) do
+    media_type =
+      value
+      |> :binary.split(";", [:global])
+      |> hd()
+      |> String.trim()
+      |> String.downcase()
+
+    if media_type == "text/event-stream", do: :ok, else: {:error, :malformed_stream}
+  end
+
+  defp stream_content_type(_value), do: {:error, :malformed_stream}
+
+  defp stream_body(state, framing, accumulator, consumer, status, content_type, informational) do
+    case consume_body(state, framing, accumulator, consumer) do
+      {:ok, completion, accumulator, wire_bytes, trailer_fields, state} ->
+        facts = %{
+          status: status,
+          content_type: content_type,
+          wire_bytes: wire_bytes,
+          informational_responses: informational,
+          trailer_fields: trailer_fields
+        }
+
+        {:ok, {:stream, completion, accumulator, facts}, state.socket}
+
+      {:error, reason, failed_state} ->
+        stream_error(reason, status, failed_state.socket)
     end
   end
 
@@ -356,6 +536,115 @@ defmodule PtcLlmHttp.Http.Parser do
   end
 
   defp read_body(state, :chunked), do: read_chunks(state, [], 0)
+
+  defp consume_body(state, :none, accumulator, _consumer),
+    do: {:ok, :complete, accumulator, 0, 0, state}
+
+  defp consume_body(state, {:content_length, length}, accumulator, consumer) do
+    if length > state.maximum_body_bytes do
+      {:error, :response_too_large, state}
+    else
+      case consume_exact(state, length, accumulator, consumer, 0) do
+        {:ok, accumulator, consumed, state} ->
+          {:ok, :complete, accumulator, consumed, 0, state}
+
+        {:halt, accumulator, consumed, state} ->
+          {:ok, :halted, accumulator, consumed, 0, state}
+
+        {:error, reason, state} ->
+          {:error, reason, state}
+      end
+    end
+  end
+
+  defp consume_body(state, :chunked, accumulator, consumer),
+    do: consume_chunks(state, accumulator, consumer, 0)
+
+  defp consume_chunks(state, accumulator, consumer, total) do
+    remaining = state.maximum_body_bytes - total
+
+    with {:ok, line, state, _line_bytes} <-
+           read_line(state, Limits.chunk_line_bytes(), Limits.chunk_line_bytes(), remaining),
+         {:ok, size} <- parse_chunk_line(line, remaining) do
+      consume_chunk(state, accumulator, consumer, total, size)
+    else
+      {:error, reason, failed_state} -> {:error, reason, failed_state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp consume_chunk(state, accumulator, _consumer, total, 0) do
+    case read_trailers(state, 0, 0) do
+      {:ok, trailer_fields, state} ->
+        {:ok, :complete, accumulator, total, trailer_fields, state}
+
+      error ->
+        error
+    end
+  end
+
+  defp consume_chunk(state, accumulator, consumer, total, size) do
+    case consume_exact(state, size, accumulator, consumer, 0) do
+      {:ok, accumulator, consumed, state} ->
+        case take_exact_binary(state, 2) do
+          {:ok, "\r\n", state} -> consume_chunks(state, accumulator, consumer, total + consumed)
+          {:ok, _invalid, state} -> {:error, :malformed_http, state}
+          error -> error
+        end
+
+      {:halt, accumulator, consumed, state} ->
+        {:ok, :halted, accumulator, total + consumed, 0, state}
+
+      {:error, reason, state} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp consume_exact(state, 0, accumulator, _consumer, consumed),
+    do: {:ok, accumulator, consumed, state}
+
+  defp consume_exact(%{buffer: buffer} = state, bytes, accumulator, consumer, consumed)
+       when byte_size(buffer) > 0 do
+    take = min(bytes, byte_size(buffer))
+    <<chunk::binary-size(^take), rest::binary>> = buffer
+    state = %{state | buffer: rest}
+    consume_piece(state, bytes - take, accumulator, consumer, consumed, chunk)
+  end
+
+  defp consume_exact(state, bytes, accumulator, consumer, consumed) do
+    maximum = min(bytes, SocketBackend.max_chunk())
+
+    case recv(state, maximum) do
+      {:ok, chunk, state} ->
+        consume_piece(
+          state,
+          bytes - byte_size(chunk),
+          accumulator,
+          consumer,
+          consumed,
+          chunk
+        )
+
+      {:error, reason, state} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp consume_piece(state, remaining, accumulator, consumer, consumed, chunk) do
+    case consumer.(chunk, accumulator) do
+      {:cont, accumulator} ->
+        consume_exact(state, remaining, accumulator, consumer, consumed + byte_size(chunk))
+
+      {:halt, accumulator} ->
+        {:halt, accumulator, consumed + byte_size(chunk), state}
+
+      {:error, reason} ->
+        {:error, reason, state}
+
+      _invalid ->
+        {:error, :transport_failure, state}
+    end
+  end
 
   defp read_chunks(state, chunks, total) do
     remaining = state.maximum_body_bytes - total

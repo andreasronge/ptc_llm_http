@@ -20,6 +20,9 @@ defmodule PtcLlmHttp.Limits do
   @chunk_line_bytes 1_024
   @trailer_bytes 16_384
   @trailer_fields 64
+  @sse_event_bytes 262_144
+  @sse_events 10_000
+  @stream_decoded_text_bytes 262_144
   @messages 1_024
   @tools 128
   @tool_calls 128
@@ -65,6 +68,9 @@ defmodule PtcLlmHttp.Limits do
   def chunk_line_bytes, do: @chunk_line_bytes
   def trailer_bytes, do: @trailer_bytes
   def trailer_fields, do: @trailer_fields
+  def sse_event_bytes, do: @sse_event_bytes
+  def sse_events, do: @sse_events
+  def stream_decoded_text_bytes, do: @stream_decoded_text_bytes
   def messages, do: @messages
   def tools, do: @tools
   def tool_calls, do: @tool_calls

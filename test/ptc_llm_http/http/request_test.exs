@@ -41,6 +41,16 @@ defmodule PtcLlmHttp.Http.RequestTest do
     assert head =~ "Authorization: Bearer secret+/=\r\n"
   end
 
+  test "advertises event streams when the response is streamed" do
+    target = target("http://127.0.0.1:8080")
+
+    assert {:ok, head, _body, _bytes} =
+             Request.encode(target, Credential.none(), ["echo"], "{}", :event_stream)
+
+    assert head =~ "Accept: text/event-stream\r\n"
+    refute head =~ "Accept: application/json\r\n"
+  end
+
   test "rejects operation-segment injection and a body above the target cap" do
     target = target("http://127.0.0.1", max_encoded_request_bytes: 2)
 

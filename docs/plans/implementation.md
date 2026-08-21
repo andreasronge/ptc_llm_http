@@ -7,8 +7,9 @@ the socket/TLS feasibility gate: the backend is pure OTP and the trust source
 is OTP's in-memory platform store. The package and its only consumer now use
 Elixir 1.20 / OTP 29 as their supported baseline. Slices 2 through 5 added the
 validated call contracts, fail-stop admission runtime, bounded HTTP/1 core,
-and independently usable OpenAI-compatible text, tool, and strict structured-
-output calls. Streaming remains for Slice 6.
+and independently usable OpenAI-compatible text, tool, strict structured-
+output, and synchronous text-streaming calls. Slice 6 is complete in this
+package; its PtcRunner integration remains a separate pinned checkpoint.
 
 ## Goal
 
@@ -666,6 +667,13 @@ full generated text. A consumer that needs full content owns a separately
 bounded accumulator, while cumulative package wire and decoded-text caps still
 apply before every callback.
 
+The completed public accessors are `StreamComplete.usage/1`,
+`StreamComplete.delivered/1`, `StreamComplete.metadata/1`,
+`StreamHalt.reason/1`, `StreamHalt.usage/1`,
+`StreamHalt.usage_complete?/1`, `StreamHalt.delivered/1`, and
+`StreamHalt.metadata/1`. `delivered/1` returns only `%{bytes:, chunks:}`. Both
+terminal structs have redacted inspection and no `Enumerable` or JSON encoder.
+
 ### Error
 
 All expected target, capacity, transport, HTTP, protocol, and provider-response
@@ -757,6 +765,7 @@ approved.
 | Aggregate trailers / trailer fields | 16,384 bytes / 64 |
 | Socket read quantum | 16,384 bytes |
 | SSE event / event count | 262,144 bytes / 10,000 |
+| Cumulative decoded stream text | 262,144 bytes |
 | Messages / declared tools / returned tool calls | 1,024 / 128 / 128 |
 | Tool name / tool-call ID | 64 / 256 bytes |
 | Tool description / one and cumulative returned argument JSON | 16,384 / 262,144 bytes |
@@ -1534,16 +1543,29 @@ performed from this repository.
 Exit met in this package: non-streaming tool and structured-output capability
 is independently releasable for supported targets.
 
-### Slice 6 — streaming
+### Slice 6 — streaming — complete
 
-- Implement bounded SSE parsing and synchronous text-delta callbacks.
-- Prove backpressure, deadline cleanup while the callback is permanently
-  blocked, cancellation, the exact tagged early-halt/partial-usage contract,
-  terminal usage, and cumulative caps.
-- Add PtcRunner direct callback-consumption and gateway disconnect tests in the
-  consumer repository; no Enumerable bridge or producer mailbox is permitted.
+- Added a bounded incremental UTF-8 SSE parser with comment/heartbeat,
+  LF/CRLF/CR, multi-line data, per-event, event-count, trailing-event, and
+  unsupported `id`/`retry` enforcement.
+- Added `PtcLlmHttp.stream/5` with exact `stream: true` plus
+  `stream_options.include_usage`, synchronous monitored callback execution,
+  natural socket backpressure, `:cont | :halt`, terminal usage, `[DONE]`, and
+  independent 262,144-byte decoded-text enforcement.
+- Added redacted stream completion/halt values and caller-retained terminal
+  handoff, including partial usage observed before early halt.
+- Proved byte-wise fragmentation, one-read event floods, permanently blocked
+  callbacks, deadline and caller-cancellation cleanup, callback raise/throw/
+  exit, early halt, usage guarantees, missing/extra terminal states, wire/event/
+  count/text overflow, and explicit V1 rejection of tool-bearing requests and
+  tool-call deltas.
+- Kept PtcRunner direct callback-consumption and gateway-disconnect tests as the
+  separate consumer-repository checkpoint; no Enumerable bridge or producer
+  mailbox was added here.
 
-Exit: text streaming parity without tool-delta support.
+Exit met in this package: text streaming parity without tool-delta support.
+PtcRunner callback consumption and gateway disconnect remain the pinned next
+integration checkpoint.
 
 ### Slice 7 — cache mode, observability, and hardening
 

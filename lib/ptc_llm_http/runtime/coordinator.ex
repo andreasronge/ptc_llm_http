@@ -116,6 +116,59 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
   end
 
   def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:ok, {:stream_candidate, candidate}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      ) do
+    terminal(state, fn -> deliver(state, candidate) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:error, {:stream, :callback_misuse, _status}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      ) do
+    terminal(state, fn -> report_cause(state, :callback_misuse) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:error, {:stream, :internal_failure, _status}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      ) do
+    terminal(state, fn -> report_cause(state, :internal_failure) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:error, {:stream, :callback_misuse, _status, :completed}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      ) do
+    error = Error.build!(:callback_failed, :stream, :provider, :completed)
+    terminal(state, fn -> deliver(state, {:error, error}) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:error, {:stream, reason, status, :completed}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      )
+      when reason in [:malformed_stream, :stream_too_large] do
+    error = Error.build!(reason, :stream, :provider, :completed, status, nil)
+    terminal(state, fn -> deliver(state, {:error, error}) end)
+  end
+
+  def handle_info(
+        {:role_result, operation_ref,
+         {:ok, {:http_exchange, {:error, {:stream, reason, status}}}}},
+        %{operation_ref: operation_ref, mode: :http, step: :socket} = state
+      )
+      when reason in [:malformed_stream, :stream_too_large] do
+    error = Error.build!(reason, :stream, :provider, :possibly_sent, status, nil)
+    terminal(state, fn -> deliver(state, {:error, error}) end)
+  end
+
+  def handle_info(
         {:role_result, operation_ref, {:ok, {:http_exchange, {:ok, response}}}},
         %{operation_ref: operation_ref, mode: :http, step: :socket} = state
       ) do
@@ -280,7 +333,11 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
     coordinator = self()
     operation_ref = state.operation_ref
     deadline = binding.deadline
-    io_operation = Map.delete(operation, :decoder)
+
+    io_operation =
+      operation
+      |> Map.delete(:decoder)
+      |> bind_stream_roles(binding.roles)
 
     progress = fn phase, dispatch ->
       transport_progress(coordinator, operation_ref, deadline, phase, dispatch)
@@ -292,6 +349,13 @@ defmodule PtcLlmHttp.Runtime.Coordinator do
 
     Role.run(binding.roles.socket, self(), operation_ref, role_operation)
     {:noreply, %{state | step: :socket}}
+  end
+
+  defp bind_stream_roles(%{streamer: nil} = operation, _roles), do: operation
+
+  defp bind_stream_roles(%{streamer: streamer} = operation, roles) do
+    streamer = Map.merge(streamer, %{codec_role: roles.codec, callback_role: roles.callback})
+    %{operation | streamer: streamer}
   end
 
   defp classify_trust_failure(state) do

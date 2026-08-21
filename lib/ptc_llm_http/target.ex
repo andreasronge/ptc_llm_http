@@ -139,6 +139,7 @@ defmodule PtcLlmHttp.Target do
   def max_encoded_request_bytes(%__MODULE__{max_encoded_request_bytes: maximum}), do: maximum
 
   @doc false
+  @spec codec_options(t()) :: map()
   def codec_options(%__MODULE__{} = target) do
     %{
       kind: target.kind,

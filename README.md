@@ -3,9 +3,8 @@
 Bounded BEAM-native HTTP transport and wire codecs for LLM requests.
 
 > **Status: pre-alpha.** The bounded HTTP/1 core and public OpenAI-compatible
-> non-streaming text, function-tool, and strict structured-output calls are
-> available. Streaming remains a later slice under the approved implementation
-> plan in `docs/plans/`.
+> text, function-tool, strict structured-output, and synchronous text-streaming
+> calls are available.
 
 ## What this is
 
@@ -57,6 +56,21 @@ older JSON-object mode when the target advertises it. Returned function
 arguments are decoded to objects, checked against the declared tool schema, and
 exposed through redacted `PtcLlmHttp.ToolCall` values. Structured content is
 validated locally and returned as deterministic canonical JSON.
+
+## Streaming calls
+
+`PtcLlmHttp.stream/5` delivers `%{delta: text}` chunks to a synchronous
+`:cont | :halt` callback. The callback runs in the attempt's monitored callback
+process, and the socket is not read again until it returns, providing natural
+backpressure without an `Enumerable` or producer mailbox. Success returns a
+redacted `PtcLlmHttp.StreamComplete`; early halt returns a redacted
+`PtcLlmHttp.StreamHalt`. Neither value accumulates generated text.
+
+V1 streaming is text-only. Tool-bearing requests are rejected before connect,
+and provider tool-call deltas are rejected as malformed streams rather than
+silently discarded. The same absolute deadline covers callbacks; deadline,
+caller cancellation, callback failure, and early halt all close the socket and
+drain the attempt tree before capacity is released.
 
 ## Requirements
 

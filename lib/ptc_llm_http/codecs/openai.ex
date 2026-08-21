@@ -21,11 +21,21 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
 
   @spec encode(Target.t(), Request.t()) :: {:ok, binary()} | {:error, Error.t()}
   def encode(target, request) do
+    encode_request(target, request, false)
+  end
+
+  @doc false
+  @spec encode_stream(Target.t(), Request.t()) :: {:ok, binary()} | {:error, Error.t()}
+  def encode_stream(target, request) do
+    encode_request(target, request, true)
+  end
+
+  defp encode_request(target, request, streaming?) do
     target_options = Target.codec_options(target)
     request_facts = Request.facts(request)
 
-    with :ok <- supported(target_options, request_facts),
-         object = body_object(target_options.model, request_facts),
+    with :ok <- supported(target_options, request_facts, streaming?),
+         object = body_object(target_options.model, request_facts, streaming?),
          {:ok, expected_bytes} <-
            bounded_encoded_size(object, target_options.max_encoded_request_bytes),
          object = materialize_json_strings(object),
@@ -68,7 +78,26 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
     _external_input -> {:error, malformed_error(facts_status(response))}
   end
 
-  defp supported(%{kind: :openai_compat, codec_version: "openai-compat-v1"} = target, request) do
+  defp supported(target, request, true) do
+    with :ok <- supported(target, request, false),
+         true <- target.streaming,
+         true <- request.tools == [],
+         true <- is_nil(request.response_schema) do
+      :ok
+    else
+      {:error, %Error{}} = error ->
+        error
+
+      _unsupported ->
+        {:error, Error.build!(:unsupported_capability, :encode, :model, :not_sent)}
+    end
+  end
+
+  defp supported(
+         %{kind: :openai_compat, codec_version: "openai-compat-v1"} = target,
+         request,
+         false
+       ) do
     cond do
       target.upstream_routing == :single_provider ->
         {:error, Error.build!(:unsupported_capability, :encode, :model, :not_sent)}
@@ -93,10 +122,10 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
     end
   end
 
-  defp supported(_target, _request),
+  defp supported(_target, _request, _streaming?),
     do: {:error, Error.build!(:unsupported_capability, :encode, :model, :not_sent)}
 
-  defp body_object(model, request) do
+  defp body_object(model, request, streaming?) do
     messages =
       case request.system do
         nil -> request.messages
@@ -107,8 +136,10 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
       {"model", model},
       {"messages", Enum.map(messages, &message_object/1)},
       {"n", 1},
-      {"stream", false}
+      {"stream", streaming?}
     ]
+
+    fields = stream_options(fields, streaming?)
 
     fields = optional_field(fields, "max_tokens", request.max_tokens)
     fields = optional_field(fields, "temperature", request.temperature)
@@ -116,6 +147,12 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
     fields = optional_tools(fields, request.tools)
     fields = optional_response_format(fields, request.response_schema)
     OrderedObject.new(fields)
+  end
+
+  defp stream_options(fields, false), do: fields
+
+  defp stream_options(fields, true) do
+    fields ++ [{"stream_options", OrderedObject.new([{"include_usage", true}])}]
   end
 
   defp message_object(%{role: :assistant, content: content, tool_calls: calls}) do
@@ -558,6 +595,15 @@ defmodule PtcLlmHttp.Codecs.OpenAI do
       _invalid -> {:error, :invalid_usage}
     end
   end
+
+  @doc false
+  def stream_usage(value), do: optional_usage(value)
+
+  @doc false
+  def stream_usage_complete?(usage, guarantees), do: usage_guarantees?(usage, guarantees)
+
+  @doc false
+  def stream_json(decoded), do: bounded_json(decoded)
 
   defp optional_usage(nil), do: {:ok, nil}
 
